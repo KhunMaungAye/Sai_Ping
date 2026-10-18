@@ -1,6 +1,6 @@
 # Sai_Ping
 
-Morrow is a home-cleaning booking app built with React, Next.js, and SQLite.
+Sai Ping is a home-cleaning booking app built with React, Next.js, and SQLite.
 
 ## Requirements
 
@@ -29,3 +29,22 @@ npm run build
 - Two arrival windows are offered per date: 9:00 AM and 2:00 PM, in the server's local timezone.
 - A SQLite write transaction re-checks a slot before inserting. A unique date/time constraint prevents duplicate reservations, including simultaneous requests.
 - SQLite is suitable for local development and a single persistent server. Deployments need a persistent disk mounted for the `data` directory; ephemeral serverless filesystems will not retain bookings.
+
+## Completing a service and collecting a rating
+
+Set a private `BOOKING_ADMIN_KEY` on the server process. Never expose it in a `NEXT_PUBLIC_*` variable or browser code. For local development, start the app with:
+
+```bash
+BOOKING_ADMIN_KEY="replace-with-a-private-key" npm run dev
+```
+
+After the cleaner finishes the job, an authorized staff tool can mark it complete:
+
+```bash
+curl -X POST "http://localhost:3000/api/bookings/<booking-id>/complete" \
+	-H "x-admin-key: replace-with-a-private-key" \
+	-H "Content-Type: application/json" \
+	-d '{"cleanerId":"cleaner-001"}'
+```
+
+Customers can open the booking-specific rating link shown on the booking confirmation. The server checks completion again when a rating is submitted and saves one 1–5 star rating linked to that booking and its cleaner.

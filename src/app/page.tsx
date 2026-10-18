@@ -154,7 +154,8 @@ export default function Home() {
           <p className="eyebrow">BOOKING RESERVED</p>
           <h1 id="confirmation-title">You can cross cleaning off your list.</h1>
           <p className="confirmation-copy">
-            Your appointment is reserved. Keep this reference for your records.
+            Your appointment is reserved. Return to your rating page after the
+            service is completed.
           </p>
           <div className="confirmation-panel">
             <div className="confirmation-id">
@@ -176,6 +177,12 @@ export default function Home() {
               <strong>{displayPrice(confirmation.priceCents)}</strong>
             </div>
           </div>
+          <Link
+            className="text-link"
+            href={`/rate/${encodeURIComponent(confirmation.id)}`}
+          >
+            View booking and rate your cleaner
+          </Link>
           <Link className="text-link" href="/">
             Book another cleaning
           </Link>
