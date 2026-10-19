@@ -729,3 +729,171 @@ a {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Recurring subscription UI */
+.frequency-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.frequency-option {
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.frequency-option:hover {
+  border-color: #9cb5a1;
+}
+.frequency-option.is-selected {
+  border-color: var(--green);
+  background: #f2f7f0;
+}
+.frequency-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.frequency-subtitle {
+  color: var(--muted);
+  font-size: 11px;
+}
+.is-selected .frequency-title {
+  color: var(--green-dark);
+}
+
+.day-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.day-option {
+  min-width: 44px;
+  height: 40px;
+  padding: 0 12px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+.day-option:hover {
+  border-color: #9cb5a1;
+}
+.day-option.is-selected {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+
+.next-service-callout {
+  margin: 18px 0 22px;
+  padding: 16px 18px;
+  border: 1px solid #c9d8cb;
+  border-left: 4px solid var(--green);
+  border-radius: 6px;
+  background: #f5f9f4;
+}
+.next-service-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.next-service-eyebrow {
+  color: var(--green);
+  font-family: var(--font-dm-mono), monospace;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.next-service-date {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.upcoming-dates-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #d5e2d6;
+  font-size: 11px;
+  color: var(--muted);
+}
+.upcoming-date-pill {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #e8f0e6;
+  color: var(--green-dark);
+  font-family: var(--font-dm-mono), monospace;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.date-range-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  max-width: 480px;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.scheduled-bookings-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.scheduled-booking-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fbfcfb;
+  font-size: 12px;
+}
+.scheduled-booking-item strong {
+  font-weight: 600;
+}
+.scheduled-booking-item span {
+  color: var(--muted);
+  font-family: var(--font-dm-mono), monospace;
+  font-size: 11px;
+}
+
+@media (max-width: 600px) {
+  .frequency-options {
+    grid-template-columns: 1fr;
+  }
+  .date-range-fields {
+    grid-template-columns: 1fr;
+  }
+}

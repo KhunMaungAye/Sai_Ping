@@ -8,6 +8,14 @@ import {
   type BookingTime,
   type ServiceId,
 } from "@/lib/services";
+import {
+  DAYS_OF_WEEK,
+  addDaysToDateString,
+  generateRecurringDates,
+  getDayNameFromDateString,
+  getNextServiceDate,
+  type Frequency,
+} from "@/lib/date-utils";
 
 type Confirmation = {
   id: string;
@@ -19,6 +27,23 @@ type Confirmation = {
   email: string;
 };
 
+type SubscriptionConfirmation = {
+  id: string;
+  serviceName: string;
+  priceCents: number;
+  frequency: Frequency;
+  preferredDay: string;
+  startDate: string;
+  endDate: string | null;
+  nextServiceDate: string;
+  time: BookingTime;
+  address: string;
+  email: string;
+  bookings: { id: string; date: string; time: BookingTime }[];
+};
+
+type ScheduleMode = "one-time" | "weekly" | "biweekly";
+
 function dateString(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
@@ -28,6 +53,16 @@ function displayDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(`${value}T12:00:00`));
+}
+
+function displayShortDate(value: string) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
     day: "numeric",
   }).format(new Date(`${value}T12:00:00`));
 }
@@ -47,10 +82,23 @@ function displayPrice(cents: number) {
   }).format(cents / 100);
 }
 
+const ORDERED_DAYS: string[] = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
 export default function Home() {
   const [serviceId, setServiceId] = useState<ServiceId>("essential");
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("one-time");
   const [minimumDate, setMinimumDate] = useState("");
   const [date, setDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [preferredDay, setPreferredDay] = useState("Monday");
   const [time, setTime] = useState<BookingTime | "">("");
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [availability, setAvailability] = useState<
@@ -62,87 +110,377 @@ export default function Home() {
   const [address, setAddress] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [conflictDate, setConflictDate] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [subscriptionConfirmation, setSubscriptionConfirmation] =
+    useState<SubscriptionConfirmation | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState("");
+
   const selectedService =
     SERVICES.find((service) => service.id === serviceId) ?? SERVICES[0];
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const today = new Date();
-      setMinimumDate(dateString(today));
+      const minStr = dateString(today);
+      setMinimumDate(minStr);
       today.setDate(today.getDate() + 1);
-      setDate(dateString(today));
+      const tomorrowStr = dateString(today);
+      setDate(tomorrowStr);
+      setPreferredDay(getDayNameFromDateString(tomorrowStr));
+      if (typeof window !== "undefined" && window.crypto?.randomUUID) {
+        setIdempotencyKey(window.crypto.randomUUID());
+      }
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
 
+  const nextServiceDate =
+    scheduleMode === "one-time"
+      ? date
+      : getNextServiceDate(date, preferredDay);
+
+  const previewDates =
+    scheduleMode !== "one-time" && date
+      ? generateRecurringDates({
+          startDate: date,
+          frequency: scheduleMode as Frequency,
+          preferredDay,
+          endDate: endDate || null,
+          occurrences: 4,
+        })
+      : [];
+
   useEffect(() => {
     if (!date) return;
     const controller = new AbortController();
-    fetch(`/api/availability?date=${encodeURIComponent(date)}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        const result = (await response.json()) as {
-          availableSlots?: string[];
-          error?: string;
-        };
-        if (!response.ok)
-          throw new Error(result.error ?? "Availability could not be checked.");
-        setAvailableSlots(result.availableSlots ?? []);
-        setAvailability("ready");
+
+    if (scheduleMode === "one-time") {
+      fetch(`/api/availability?date=${encodeURIComponent(date)}`, {
+        cache: "no-store",
+        signal: controller.signal,
       })
-      .catch((reason: unknown) => {
-        if (reason instanceof Error && reason.name === "AbortError") return;
-        setAvailableSlots([]);
-        setAvailability("error");
-      });
+        .then(async (response) => {
+          const result = (await response.json()) as {
+            availableSlots?: string[];
+            error?: string;
+          };
+          if (!response.ok)
+            throw new Error(
+              result.error ?? "Availability could not be checked.",
+            );
+          setAvailableSlots(result.availableSlots ?? []);
+          setAvailability("ready");
+          setConflictDate(null);
+        })
+        .catch((reason: unknown) => {
+          if (reason instanceof Error && reason.name === "AbortError") return;
+          setAvailableSlots([]);
+          setAvailability("error");
+        });
+    } else {
+      // Recurring schedule: check availability of preferred arrival slots
+      const checkDate = nextServiceDate || date;
+      const checkFrequency = scheduleMode;
+      const checkEnd = endDate ? `&endDate=${encodeURIComponent(endDate)}` : "";
+
+      const checkTime = time || "09:00";
+      fetch(
+        `/api/subscriptions?startDate=${encodeURIComponent(checkDate)}&frequency=${checkFrequency}&time=${checkTime}&preferredDay=${encodeURIComponent(preferredDay)}${checkEnd}`,
+        {
+          cache: "no-store",
+          signal: controller.signal,
+        },
+      )
+        .then(async (response) => {
+          const result = (await response.json()) as {
+            available?: boolean;
+            conflictDate?: string | null;
+            error?: string;
+          };
+          if (!response.ok) {
+            setAvailableSlots([]);
+            setAvailability("error");
+            return;
+          }
+          if (result.available) {
+            setAvailableSlots([...TIME_SLOTS]);
+            setConflictDate(null);
+          } else {
+            setConflictDate(result.conflictDate ?? null);
+            setAvailableSlots([]);
+          }
+          setAvailability("ready");
+        })
+        .catch((reason: unknown) => {
+          if (reason instanceof Error && reason.name === "AbortError") return;
+          setAvailableSlots([]);
+          setAvailability("error");
+        });
+    }
+
     return () => controller.abort();
-  }, [date, refresh]);
+  }, [date, scheduleMode, preferredDay, endDate, time, refresh, nextServiceDate]);
+
+  function handlePreferredDaySelect(dayName: string) {
+    setPreferredDay(dayName);
+    setError("");
+    setConflictDate(null);
+
+    // Compute the next upcoming date for this day of the week
+    const targetDayIndex = DAYS_OF_WEEK.indexOf(
+      dayName as (typeof DAYS_OF_WEEK)[number],
+    );
+    if (targetDayIndex >= 0 && minimumDate) {
+      const [y, m, d] = minimumDate.split("-").map(Number);
+      const minDayIndex = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      const diff = (targetDayIndex - minDayIndex + 7) % 7;
+      const computedDate = addDaysToDateString(minimumDate, diff);
+      setDate(computedDate);
+    }
+  }
+
+  function handleDateChange(newDate: string) {
+    setDate(newDate);
+    setTime("");
+    setAvailability("loading");
+    setError("");
+    setConflictDate(null);
+
+    if (newDate && /^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+      const day = getDayNameFromDateString(newDate);
+      setPreferredDay(day);
+    }
+  }
 
   async function submitBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setConflictDate(null);
+
+    // Client-side validations
+    if (!date || (minimumDate && date < minimumDate)) {
+      setError("Start date cannot be in the past.");
+      return;
+    }
+
+    if (scheduleMode !== "one-time" && endDate && endDate < date) {
+      setError("End date cannot be earlier than start date.");
+      return;
+    }
+
+    if (!time) {
+      setError("Please choose an arrival time.");
+      return;
+    }
+
     setIsSubmitting(true);
+
     try {
-      const response = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, address, serviceId, date, time }),
-      });
-      const result = (await response.json().catch(() => null)) as {
-        booking?: Confirmation;
-        error?: string;
-        code?: string;
-      } | null;
-      if (response.status === 409 && result?.code === "SLOT_UNAVAILABLE") {
-        setTime("");
-        setAvailability("loading");
-        setRefresh((value) => value + 1);
-        setError(
-          result.error ??
-            "That appointment was just booked. Choose another time.",
-        );
-        return;
+      if (scheduleMode === "one-time") {
+        const response = await fetch("/api/bookings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, email, address, serviceId, date, time }),
+        });
+        const result = (await response.json().catch(() => null)) as {
+          booking?: Confirmation;
+          error?: string;
+          code?: string;
+        } | null;
+
+        if (response.status === 409 && result?.code === "SLOT_UNAVAILABLE") {
+          setTime("");
+          setAvailability("loading");
+          setRefresh((value) => value + 1);
+          setError(
+            result.error ??
+              "That appointment was just booked. Choose another time.",
+          );
+          return;
+        }
+
+        if (!response.ok || !result?.booking) {
+          throw new Error(
+            result?.error ??
+              "Your booking could not be saved. Please try again.",
+          );
+        }
+
+        setConfirmation(result.booking);
+      } else {
+        // Recurring subscription setup
+        const response = await fetch("/api/subscriptions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "idempotency-key": idempotencyKey,
+          },
+          body: JSON.stringify({
+            name,
+            email,
+            address,
+            serviceId,
+            frequency: scheduleMode,
+            preferredDay,
+            startDate: date,
+            endDate: endDate || null,
+            time,
+            idempotencyKey,
+          }),
+        });
+
+        const result = (await response.json().catch(() => null)) as {
+          subscription?: SubscriptionConfirmation;
+          bookings?: { id: string; date: string; time: BookingTime }[];
+          error?: string;
+          code?: string;
+          conflictDate?: string;
+        } | null;
+
+        if (
+          response.status === 409 &&
+          result?.code === "RECURRING_SLOT_UNAVAILABLE"
+        ) {
+          setConflictDate(result.conflictDate ?? null);
+          setError(
+            result.error ??
+              `Cleaner is unavailable on ${result.conflictDate || "a recurring date"}. No bookings were created.`,
+          );
+          return;
+        }
+
+        if (!response.ok || !result?.subscription) {
+          throw new Error(
+            result?.error ??
+              "Your subscription could not be saved. Please try again.",
+          );
+        }
+
+        setSubscriptionConfirmation({
+          ...result.subscription,
+          bookings: result.bookings ?? [],
+        });
       }
-      if (!response.ok || !result?.booking) {
-        throw new Error(
-          result?.error ?? "Your booking could not be saved. Please try again.",
-        );
-      }
-      setConfirmation(result.booking);
     } catch (reason) {
       setError(
         reason instanceof Error
           ? reason.message
-          : "Your booking could not be saved.",
+          : "Your request could not be processed.",
       );
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  // Confirmation view for Recurring Subscription
+  if (subscriptionConfirmation) {
+    return (
+      <main className="app-shell">
+        <Header />
+        <section
+          className="confirmation-page"
+          aria-labelledby="subscription-confirmation-title"
+        >
+          <p className="eyebrow">SUBSCRIPTION RESERVED</p>
+          <h1 id="subscription-confirmation-title">
+            Your recurring cleaning is set up.
+          </h1>
+          <p className="confirmation-copy">
+            We will arrive on your preferred day according to your schedule.
+            Return to your rating page after each service is completed.
+          </p>
+          <div className="confirmation-panel">
+            <div className="confirmation-id">
+              <span>SUBSCRIPTION REFERENCE</span>
+              <strong>
+                {subscriptionConfirmation.id.slice(0, 8).toUpperCase()}
+              </strong>
+            </div>
+            <dl className="summary-details">
+              <SummaryRow
+                label="Service"
+                value={subscriptionConfirmation.serviceName}
+              />
+              <SummaryRow
+                label="Frequency"
+                value={
+                  subscriptionConfirmation.frequency === "weekly"
+                    ? "Weekly (Every week)"
+                    : "Biweekly (Every 2 weeks)"
+                }
+              />
+              <SummaryRow
+                label="Preferred day"
+                value={`Every ${subscriptionConfirmation.preferredDay}`}
+              />
+              <SummaryRow
+                label="Next service"
+                value={`${displayDate(subscriptionConfirmation.nextServiceDate)} at ${displayTime(subscriptionConfirmation.time)}`}
+              />
+              {subscriptionConfirmation.endDate ? (
+                <SummaryRow
+                  label="End date"
+                  value={displayDate(subscriptionConfirmation.endDate)}
+                />
+              ) : null}
+              <SummaryRow
+                label="Address"
+                value={subscriptionConfirmation.address}
+              />
+              <SummaryRow
+                label="Email"
+                value={subscriptionConfirmation.email}
+              />
+            </dl>
+            <div className="confirmation-total">
+              <span>Price per visit</span>
+              <strong>
+                {displayPrice(subscriptionConfirmation.priceCents)}
+              </strong>
+            </div>
+
+            {subscriptionConfirmation.bookings.length > 0 ? (
+              <div style={{ marginTop: "20px" }}>
+                <span className="field-label">Scheduled cleanings</span>
+                <ul className="scheduled-bookings-list">
+                  {subscriptionConfirmation.bookings.map((booking, idx) => (
+                    <li key={booking.id} className="scheduled-booking-item">
+                      <strong>
+                        Visit {idx + 1}: {displayShortDate(booking.date)}
+                      </strong>
+                      <span>{displayTime(booking.time)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+
+          {subscriptionConfirmation.bookings[0] ? (
+            <Link
+              className="text-link"
+              href={`/rate/${encodeURIComponent(subscriptionConfirmation.bookings[0].id)}`}
+            >
+              View first booking and rate cleaner
+            </Link>
+          ) : null}
+          <Link
+            className="text-link"
+            href="/"
+            onClick={() => {
+              setConfirmation(null);
+              setSubscriptionConfirmation(null);
+            }}
+          >
+            Book another cleaning
+          </Link>
+        </section>
+      </main>
+    );
+  }
+
+  // Confirmation view for One-Time Booking
   if (confirmation) {
     return (
       <main className="app-shell">
@@ -183,7 +521,14 @@ export default function Home() {
           >
             View booking and rate your cleaner
           </Link>
-          <Link className="text-link" href="/">
+          <Link
+            className="text-link"
+            href="/"
+            onClick={() => {
+              setConfirmation(null);
+              setSubscriptionConfirmation(null);
+            }}
+          >
             Book another cleaning
           </Link>
         </section>
@@ -191,10 +536,18 @@ export default function Home() {
     );
   }
 
+  const isEndDateInvalid =
+    scheduleMode !== "one-time" && Boolean(endDate && endDate < date);
+  const isStartDateInvalid = Boolean(
+    date && minimumDate && date < minimumDate,
+  );
+
   const canSubmit =
     Boolean(name.trim() && email.trim() && address.trim() && time) &&
-    availability === "ready" &&
-    availableSlots.includes(time);
+    !isStartDateInvalid &&
+    !isEndDateInvalid &&
+    !conflictDate &&
+    availability === "ready";
 
   return (
     <main className="app-shell">
@@ -203,7 +556,7 @@ export default function Home() {
         <div className="page-heading">
           <p className="eyebrow">HOME CLEANING, MADE SIMPLE</p>
           <h1>Book a cleaning</h1>
-          <p>Choose your service and a time that works for you.</p>
+          <p>Choose your service and a schedule that fits your life.</p>
         </div>
         <div className="booking-layout">
           <form
@@ -258,26 +611,157 @@ export default function Home() {
             >
               <SectionHeading
                 number="02"
-                title="Set the appointment"
+                title="Set the schedule & appointment"
                 id="appointment-heading"
               />
-              <label className="field-label" htmlFor="service-date">
-                Cleaning date
-              </label>
-              <input
-                className="text-input date-input"
-                id="service-date"
-                type="date"
-                min={minimumDate}
-                value={date}
-                required
-                onChange={(event) => {
-                  setDate(event.target.value);
-                  setTime("");
-                  setAvailability("loading");
-                  setError("");
-                }}
-              />
+
+              <label className="field-label">Subscription & Frequency</label>
+              <div
+                className="frequency-options"
+                role="group"
+                aria-label="Cleaning Frequency"
+              >
+                <button
+                  type="button"
+                  className={`frequency-option${scheduleMode === "one-time" ? " is-selected" : ""}`}
+                  aria-pressed={scheduleMode === "one-time"}
+                  onClick={() => {
+                    setScheduleMode("one-time");
+                    setError("");
+                    setConflictDate(null);
+                  }}
+                >
+                  <span className="frequency-title">One-time clean</span>
+                  <span className="frequency-subtitle">Single service</span>
+                </button>
+                <button
+                  type="button"
+                  className={`frequency-option${scheduleMode === "weekly" ? " is-selected" : ""}`}
+                  aria-pressed={scheduleMode === "weekly"}
+                  onClick={() => {
+                    setScheduleMode("weekly");
+                    setError("");
+                    setConflictDate(null);
+                  }}
+                >
+                  <span className="frequency-title">Weekly clean</span>
+                  <span className="frequency-subtitle">Every 7 days</span>
+                </button>
+                <button
+                  type="button"
+                  className={`frequency-option${scheduleMode === "biweekly" ? " is-selected" : ""}`}
+                  aria-pressed={scheduleMode === "biweekly"}
+                  onClick={() => {
+                    setScheduleMode("biweekly");
+                    setError("");
+                    setConflictDate(null);
+                  }}
+                >
+                  <span className="frequency-title">Biweekly clean</span>
+                  <span className="frequency-subtitle">Every 2 weeks</span>
+                </button>
+              </div>
+
+              {scheduleMode !== "one-time" ? (
+                <>
+                  <label className="field-label">Preferred service day</label>
+                  <div
+                    className="day-options"
+                    role="group"
+                    aria-label="Preferred day of the week"
+                  >
+                    {ORDERED_DAYS.map((day) => {
+                      const isSelected = preferredDay === day;
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          className={`day-option${isSelected ? " is-selected" : ""}`}
+                          aria-pressed={isSelected}
+                          onClick={() => handlePreferredDaySelect(day)}
+                        >
+                          {day.slice(0, 3)}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="next-service-callout" role="region" aria-label="Next scheduled service date">
+                    <div className="next-service-header">
+                      <span className="next-service-eyebrow">
+                        NEXT SCHEDULED SERVICE DATE
+                      </span>
+                      <span className="slot-timezone">
+                        {scheduleMode === "weekly" ? "Weekly" : "Biweekly"} on {preferredDay}s
+                      </span>
+                    </div>
+                    <div className="next-service-date">
+                      {nextServiceDate ? displayDate(nextServiceDate) : "Select a start date"}
+                    </div>
+                    {previewDates.length > 0 ? (
+                      <div className="upcoming-dates-list">
+                        <span>Upcoming visits:</span>
+                        {previewDates.map((d) => (
+                          <span key={d} className="upcoming-date-pill">
+                            {displayShortDate(d)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+
+              <div className="date-range-fields">
+                <div>
+                  <label className="field-label" htmlFor="service-date">
+                    {scheduleMode === "one-time" ? "Cleaning date" : "Start date"}
+                  </label>
+                  <input
+                    className="text-input date-input"
+                    id="service-date"
+                    type="date"
+                    min={minimumDate}
+                    value={date}
+                    required
+                    onChange={(event) => handleDateChange(event.target.value)}
+                  />
+                  {isStartDateInvalid ? (
+                    <span className="field-hint" style={{ color: "var(--coral)" }}>
+                      Start date cannot be in the past.
+                    </span>
+                  ) : null}
+                </div>
+
+                {scheduleMode !== "one-time" ? (
+                  <div>
+                    <label className="field-label" htmlFor="end-date">
+                      End date (optional)
+                    </label>
+                    <input
+                      className="text-input date-input"
+                      id="end-date"
+                      type="date"
+                      min={date || minimumDate}
+                      value={endDate}
+                      onChange={(event) => {
+                        setEndDate(event.target.value);
+                        setError("");
+                      }}
+                    />
+                    {isEndDateInvalid ? (
+                      <span className="field-hint" style={{ color: "var(--coral)" }}>
+                        End date cannot be earlier than start date.
+                      </span>
+                    ) : (
+                      <span className="field-hint">
+                        Leave blank for standard initial visits.
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
               <div className="slot-heading">
                 <span className="field-label">Arrival time</span>
                 <span className="slot-timezone">Local time</span>
@@ -289,7 +773,9 @@ export default function Home() {
               >
                 {TIME_SLOTS.map((slot) => {
                   const available =
-                    availability === "ready" && availableSlots.includes(slot);
+                    availability === "ready" &&
+                    availableSlots.includes(slot) &&
+                    !conflictDate;
                   return (
                     <button
                       className={`time-option${time === slot ? " is-selected" : ""}`}
@@ -308,17 +794,28 @@ export default function Home() {
                           ? "Checking"
                           : availability === "error"
                             ? "Unavailable"
-                            : available
-                              ? "Available"
-                              : "Booked"}
+                            : conflictDate
+                              ? "Conflict"
+                              : available
+                                ? "Available"
+                                : "Booked"}
                       </span>
                     </button>
                   );
                 })}
               </div>
+
+              {conflictDate ? (
+                <div className="form-error" role="alert" style={{ marginTop: "14px" }}>
+                  <strong>Cleaner Conflict:</strong> Unavailable on{" "}
+                  {displayDate(conflictDate)} at {time ? displayTime(time) : "selected slot"}.
+                  Please choose another day or time.
+                </div>
+              ) : null}
+
               {availability === "error" ? (
                 <div className="availability-message" role="status">
-                  <span>Could not check times for this date.</span>
+                  <span>Could not check times for this schedule.</span>
                   <button
                     type="button"
                     className="inline-button"
@@ -330,9 +827,11 @@ export default function Home() {
                     Try again
                   </button>
                 </div>
-              ) : availability === "ready" && availableSlots.length === 0 ? (
+              ) : availability === "ready" &&
+                availableSlots.length === 0 &&
+                !conflictDate ? (
                 <p className="availability-message" role="status">
-                  No appointments are open for this date. Try another day.
+                  No appointments are open for this schedule. Try another day or time.
                 </p>
               ) : null}
             </section>
@@ -400,7 +899,9 @@ export default function Home() {
 
           <aside className="summary-panel" aria-labelledby="summary-heading">
             <div className="summary-topline">
-              <p className="eyebrow">YOUR APPOINTMENT</p>
+              <p className="eyebrow">
+                {scheduleMode === "one-time" ? "YOUR APPOINTMENT" : "YOUR SUBSCRIPTION"}
+              </p>
               <span className="summary-status">
                 <span /> Live price
               </span>
@@ -410,10 +911,33 @@ export default function Home() {
             <div className="summary-price">
               {displayPrice(selectedService.priceCents)}
             </div>
-            <p className="price-caption">Flat price for this service</p>
+            <p className="price-caption">
+              {scheduleMode === "one-time"
+                ? "Flat price for this service"
+                : "Flat price per service visit"}
+            </p>
             <div className="summary-rule" />
             <dl className="summary-details">
-              <SummaryRow label="Date" value={displayDate(date)} />
+              <SummaryRow
+                label="Cadence"
+                value={
+                  scheduleMode === "one-time"
+                    ? "One-time service"
+                    : scheduleMode === "weekly"
+                      ? "Weekly subscription"
+                      : "Biweekly subscription"
+                }
+              />
+              {scheduleMode !== "one-time" ? (
+                <SummaryRow
+                  label="Day"
+                  value={`Every ${preferredDay}`}
+                />
+              ) : null}
+              <SummaryRow
+                label="Next service"
+                value={displayDate(nextServiceDate)}
+              />
               <SummaryRow
                 label="Arrival"
                 value={time ? displayTime(time) : "Choose a time"}
@@ -424,21 +948,29 @@ export default function Home() {
               />
               <SummaryRow label="Contact" value={email || "Add your email"} />
             </dl>
+
             {error ? (
               <p className="form-error" role="alert">
                 {error}
               </p>
             ) : null}
+
             <button
               className="confirm-button"
               type="submit"
               form="booking-form"
               disabled={!canSubmit || isSubmitting}
             >
-              {isSubmitting ? "Reserving your time..." : "Confirm booking"}
+              {isSubmitting
+                ? "Reserving..."
+                : scheduleMode === "one-time"
+                  ? "Confirm booking"
+                  : `Confirm ${scheduleMode} subscription`}
             </button>
             <p className="summary-footnote">
-              Your time is checked again when you confirm.
+              {scheduleMode === "one-time"
+                ? "Your time is checked again when you confirm."
+                : "All recurring dates are validated before confirming."}
             </p>
           </aside>
         </div>

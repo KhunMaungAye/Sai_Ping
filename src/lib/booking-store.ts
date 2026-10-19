@@ -7,7 +7,36 @@ import {
   TIME_SLOTS,
   type BookingTime,
   type ServiceId,
-} from "@/lib/services";
+} from "./services.ts";
+
+export { SERVICES, TIME_SLOTS, type BookingTime, type ServiceId };
+import {
+  addDaysToDateString,
+  DAYS_OF_WEEK,
+  generateRecurringDates,
+  getDayNameFromDateString,
+  getDayOfWeekFromDateString,
+  getNextServiceDate,
+  isBookableDate,
+  localDateString,
+  normalizeDayName,
+  type DayOfWeekName,
+  type Frequency,
+} from "./date-utils.ts";
+
+export {
+  addDaysToDateString,
+  DAYS_OF_WEEK,
+  generateRecurringDates,
+  getDayNameFromDateString,
+  getDayOfWeekFromDateString,
+  getNextServiceDate,
+  isBookableDate,
+  localDateString,
+  normalizeDayName,
+  type DayOfWeekName,
+  type Frequency,
+};
 
 export type BookingInput = {
   name: string;
@@ -24,6 +53,7 @@ export type Booking = BookingInput & {
   priceCents: number;
   createdAt: string;
   cleanerName: string;
+  subscriptionId?: string | null;
 };
 
 export type BookingRatingDetails = {
@@ -35,6 +65,55 @@ export type BookingRatingDetails = {
   cleanerName: string;
   rating: number | null;
 };
+
+export type SubscriptionInput = {
+  name: string;
+  email: string;
+  serviceId: ServiceId;
+  address: string;
+  frequency: Frequency;
+  preferredDay?: string;
+  startDate: string;
+  endDate?: string | null;
+  occurrences?: number;
+  time: BookingTime;
+  idempotencyKey?: string;
+};
+
+export type Subscription = {
+  id: string;
+  name: string;
+  email: string;
+  address: string;
+  serviceId: ServiceId;
+  serviceName: string;
+  priceCents: number;
+  frequency: Frequency;
+  preferredDay: string;
+  startDate: string;
+  endDate: string | null;
+  time: BookingTime;
+  cleanerName: string;
+  createdAt: string;
+  status: "active" | "cancelled";
+  idempotencyKey?: string | null;
+  nextServiceDate: string;
+  scheduledCount?: number;
+};
+
+export type RecurringBookingResult =
+  | {
+      status: "created";
+      subscription: Subscription;
+      bookings: Booking[];
+      isDuplicate?: boolean;
+    }
+  | {
+      status: "conflict";
+      conflictDate: string;
+      time: BookingTime;
+      error: string;
+    };
 
 export const DEFAULT_CLEANER = {
   id: "cleaner-001",
@@ -55,94 +134,148 @@ type StoredBooking = {
   cleaner_id: string;
   cleaner_name: string;
   status: "scheduled" | "completed";
+  subscription_id?: string | null;
+};
+
+type StoredSubscription = {
+  id: string;
+  name: string;
+  email: string;
+  address: string;
+  service_id: ServiceId;
+  service_name: string;
+  price_cents: number;
+  frequency: Frequency;
+  preferred_day: string;
+  start_date: string;
+  end_date: string | null;
+  time_slot: BookingTime;
+  cleaner_id: string;
+  cleaner_name: string;
+  idempotency_key: string | null;
+  created_at: string;
+  status: "active" | "cancelled";
 };
 
 const globalForSqlite = globalThis as typeof globalThis & {
   cleaningDatabase?: DatabaseSync;
 };
 
-function getDatabase() {
-  if (!globalForSqlite.cleaningDatabase) {
-    const dataDirectory = path.join(process.cwd(), "data");
-    mkdirSync(dataDirectory, { recursive: true });
-
-    const database = new DatabaseSync(
-      path.join(dataDirectory, "bookings.sqlite"),
+function initDatabaseSchema(database: DatabaseSync) {
+  database.exec("PRAGMA busy_timeout = 5000;");
+  database.exec("PRAGMA foreign_keys = ON;");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS cleaners (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL
     );
-    database.exec("PRAGMA busy_timeout = 5000;");
-    database.exec("PRAGMA journal_mode = WAL;");
-    database.exec("PRAGMA foreign_keys = ON;");
-    database.exec(`
-      CREATE TABLE IF NOT EXISTS cleaners (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL
-      );
 
-      INSERT OR IGNORE INTO cleaners (id, name)
-      VALUES ('${DEFAULT_CLEANER.id}', '${DEFAULT_CLEANER.name}');
+    INSERT OR IGNORE INTO cleaners (id, name)
+    VALUES ('${DEFAULT_CLEANER.id}', '${DEFAULT_CLEANER.name}');
 
-      CREATE TABLE IF NOT EXISTS bookings (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL,
-        service_id TEXT NOT NULL,
-        service_name TEXT NOT NULL,
-        price_cents INTEGER NOT NULL,
-        service_date TEXT NOT NULL,
-        time_slot TEXT NOT NULL,
-        address TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        cleaner_id TEXT NOT NULL DEFAULT '${DEFAULT_CLEANER.id}' REFERENCES cleaners(id),
-        status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed')),
-        UNIQUE (service_date, time_slot)
-      );
-    `);
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      service_id TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      price_cents INTEGER NOT NULL,
+      service_date TEXT NOT NULL,
+      time_slot TEXT NOT NULL,
+      address TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      cleaner_id TEXT NOT NULL DEFAULT '${DEFAULT_CLEANER.id}' REFERENCES cleaners(id),
+      status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed')),
+      UNIQUE (service_date, time_slot)
+    );
+  `);
 
-    const bookingColumns = database
-      .prepare("PRAGMA table_info(bookings)")
-      .all() as { name: string }[];
-    if (!bookingColumns.some((column) => column.name === "cleaner_id")) {
-      database.exec(
-        `ALTER TABLE bookings ADD COLUMN cleaner_id TEXT NOT NULL DEFAULT '${DEFAULT_CLEANER.id}';`,
-      );
+  const bookingColumns = database
+    .prepare("PRAGMA table_info(bookings)")
+    .all() as { name: string }[];
+
+  if (!bookingColumns.some((column) => column.name === "cleaner_id")) {
+    database.exec(
+      `ALTER TABLE bookings ADD COLUMN cleaner_id TEXT NOT NULL DEFAULT '${DEFAULT_CLEANER.id}';`,
+    );
+  }
+  if (!bookingColumns.some((column) => column.name === "status")) {
+    database.exec(
+      "ALTER TABLE bookings ADD COLUMN status TEXT NOT NULL DEFAULT 'scheduled';",
+    );
+  }
+  if (!bookingColumns.some((column) => column.name === "subscription_id")) {
+    database.exec("ALTER TABLE bookings ADD COLUMN subscription_id TEXT;");
+  }
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS ratings (
+      id TEXT PRIMARY KEY,
+      booking_id TEXT NOT NULL UNIQUE REFERENCES bookings(id),
+      cleaner_id TEXT NOT NULL REFERENCES cleaners(id),
+      stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      address TEXT NOT NULL,
+      service_id TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      price_cents INTEGER NOT NULL,
+      frequency TEXT NOT NULL CHECK (frequency IN ('weekly', 'biweekly')),
+      preferred_day TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      time_slot TEXT NOT NULL,
+      cleaner_id TEXT NOT NULL DEFAULT '${DEFAULT_CLEANER.id}' REFERENCES cleaners(id),
+      idempotency_key TEXT UNIQUE,
+      created_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled'))
+    );
+  `);
+}
+
+export function getDatabase(customPath?: string) {
+  if (customPath) {
+    const database = new DatabaseSync(customPath);
+    initDatabaseSchema(database);
+    return database;
+  }
+
+  if (!globalForSqlite.cleaningDatabase) {
+    const dbPath =
+      process.env.DATABASE_PATH ||
+      path.join(process.cwd(), "data", "bookings.sqlite");
+
+    if (dbPath !== ":memory:") {
+      mkdirSync(path.dirname(dbPath), { recursive: true });
     }
-    if (!bookingColumns.some((column) => column.name === "status")) {
-      database.exec(
-        "ALTER TABLE bookings ADD COLUMN status TEXT NOT NULL DEFAULT 'scheduled';",
-      );
-    }
 
-    database.exec(`
-      CREATE TABLE IF NOT EXISTS ratings (
-        id TEXT PRIMARY KEY,
-        booking_id TEXT NOT NULL UNIQUE REFERENCES bookings(id),
-        cleaner_id TEXT NOT NULL REFERENCES cleaners(id),
-        stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
-        created_at TEXT NOT NULL
-      );
-    `);
+    const database = new DatabaseSync(dbPath);
+    if (dbPath !== ":memory:") {
+      database.exec("PRAGMA journal_mode = WAL;");
+    }
+    initDatabaseSchema(database);
     globalForSqlite.cleaningDatabase = database;
   }
 
   return globalForSqlite.cleaningDatabase;
 }
 
-export function localDateString(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-export function isBookableDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return (
-    !Number.isNaN(date.getTime()) &&
-    date.toISOString().slice(0, 10) === value &&
-    value >= localDateString()
-  );
+export function resetDatabaseForTesting(db?: DatabaseSync) {
+  if (globalForSqlite.cleaningDatabase) {
+    try {
+      globalForSqlite.cleaningDatabase.close();
+    } catch {}
+    delete globalForSqlite.cleaningDatabase;
+  }
+  if (db) {
+    initDatabaseSchema(db);
+    globalForSqlite.cleaningDatabase = db;
+  }
 }
 
 export function isServiceId(value: unknown): value is ServiceId {
@@ -176,6 +309,55 @@ export function listAvailableSlots(date: string) {
   );
 }
 
+export function checkRecurringAvailability({
+  startDate,
+  frequency,
+  time,
+  endDate,
+  occurrences = 4,
+  preferredDay,
+}: {
+  startDate: string;
+  frequency: Frequency;
+  time: BookingTime;
+  endDate?: string | null;
+  occurrences?: number;
+  preferredDay?: string;
+}) {
+  const database = getDatabase();
+  const nextServiceDate = getNextServiceDate(startDate, preferredDay);
+  const dates = generateRecurringDates({
+    startDate,
+    frequency,
+    endDate,
+    occurrences,
+    preferredDay,
+  });
+
+  for (const date of dates) {
+    const existing = database
+      .prepare(
+        "SELECT id FROM bookings WHERE service_date = ? AND time_slot = ?",
+      )
+      .get(date, time);
+    if (existing) {
+      return {
+        available: false,
+        conflictDate: date,
+        nextServiceDate,
+        dates,
+      };
+    }
+  }
+
+  return {
+    available: true,
+    conflictDate: null,
+    nextServiceDate,
+    dates,
+  };
+}
+
 function toBooking(row: StoredBooking): Booking {
   return {
     id: row.id,
@@ -189,6 +371,33 @@ function toBooking(row: StoredBooking): Booking {
     address: row.address,
     createdAt: row.created_at,
     cleanerName: row.cleaner_name,
+    subscriptionId: row.subscription_id ?? null,
+  };
+}
+
+function toSubscription(
+  row: StoredSubscription,
+  cleanerName: string,
+  nextServiceDate: string,
+): Subscription {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    address: row.address,
+    serviceId: row.service_id,
+    serviceName: row.service_name,
+    priceCents: row.price_cents,
+    frequency: row.frequency,
+    preferredDay: row.preferred_day,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    time: row.time_slot,
+    cleanerName: cleanerName || row.cleaner_name,
+    createdAt: row.created_at,
+    status: row.status,
+    idempotencyKey: row.idempotency_key,
+    nextServiceDate,
   };
 }
 
@@ -257,6 +466,230 @@ export function createBooking(input: BookingInput) {
     database.exec("ROLLBACK;");
     throw error;
   }
+}
+
+export function createRecurringSubscription(
+  input: SubscriptionInput,
+): RecurringBookingResult {
+  const database = getDatabase();
+  const service = SERVICES.find((item) => item.id === input.serviceId);
+  const cleaner = database
+    .prepare("SELECT id, name FROM cleaners WHERE id = ?")
+    .get(DEFAULT_CLEANER.id) as { id: string; name: string } | undefined;
+
+  if (!service || !cleaner) {
+    throw new Error("Subscription configuration is incomplete");
+  }
+
+  const preferredDayName = input.preferredDay
+    ? normalizeDayName(input.preferredDay) ??
+      getDayNameFromDateString(input.startDate)
+    : getDayNameFromDateString(input.startDate);
+
+  const nextServiceDate = getNextServiceDate(
+    input.startDate,
+    input.preferredDay,
+  );
+
+  const dates = generateRecurringDates({
+    startDate: input.startDate,
+    frequency: input.frequency,
+    endDate: input.endDate,
+    occurrences: input.occurrences ?? 4,
+    preferredDay: input.preferredDay,
+  });
+
+  if (dates.length === 0) {
+    throw new Error(
+      "No appointment dates could be generated for the specified schedule.",
+    );
+  }
+
+  database.exec("BEGIN IMMEDIATE;");
+  try {
+    // Edge Case 4: Idempotency safeguard
+    if (input.idempotencyKey) {
+      const existingSub = database
+        .prepare("SELECT * FROM subscriptions WHERE idempotency_key = ?")
+        .get(input.idempotencyKey) as StoredSubscription | undefined;
+
+      if (existingSub) {
+        const rows = database
+          .prepare(
+            `SELECT bookings.*, cleaners.name AS cleaner_name
+             FROM bookings
+             JOIN cleaners ON cleaners.id = bookings.cleaner_id
+             WHERE subscription_id = ?
+             ORDER BY service_date ASC`,
+          )
+          .all(existingSub.id) as StoredBooking[];
+
+        database.exec("COMMIT;");
+        return {
+          status: "created",
+          subscription: toSubscription(
+            existingSub,
+            cleaner.name,
+            nextServiceDate,
+          ),
+          bookings: rows.map(toBooking),
+          isDuplicate: true,
+        };
+      }
+    }
+
+    // Edge Case 1: Cleaner unavailable on ANY recurring date.
+    // Ensure atomic rollback so no partial/overlapping bookings are saved.
+    for (const date of dates) {
+      const conflict = database
+        .prepare(
+          "SELECT id FROM bookings WHERE service_date = ? AND time_slot = ?",
+        )
+        .get(date, input.time);
+
+      if (conflict) {
+        database.exec("ROLLBACK;");
+        return {
+          status: "conflict",
+          conflictDate: date,
+          time: input.time,
+          error: `Cleaner is unavailable on ${date} at ${input.time}. No bookings were created.`,
+        };
+      }
+    }
+
+    const subscriptionId = randomUUID();
+    const createdAt = new Date().toISOString();
+
+    database
+      .prepare(
+        `INSERT INTO subscriptions (
+          id, name, email, address, service_id, service_name, price_cents,
+          frequency, preferred_day, start_date, end_date, time_slot, cleaner_id,
+          idempotency_key, created_at, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+      )
+      .run(
+        subscriptionId,
+        input.name,
+        input.email,
+        input.address,
+        input.serviceId,
+        service.name,
+        service.priceCents,
+        input.frequency,
+        preferredDayName,
+        input.startDate,
+        input.endDate ?? null,
+        input.time,
+        cleaner.id,
+        input.idempotencyKey ?? null,
+        createdAt,
+      );
+
+    const createdBookings: Booking[] = [];
+    const insertBookingStmt = database.prepare(
+      `INSERT INTO bookings (
+        id, name, email, service_id, service_name, price_cents,
+        service_date, time_slot, address, created_at, cleaner_id, status, subscription_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)`,
+    );
+
+    for (const date of dates) {
+      const bookingId = randomUUID();
+      insertBookingStmt.run(
+        bookingId,
+        input.name,
+        input.email,
+        input.serviceId,
+        service.name,
+        service.priceCents,
+        date,
+        input.time,
+        input.address,
+        createdAt,
+        cleaner.id,
+        subscriptionId,
+      );
+
+      createdBookings.push({
+        id: bookingId,
+        name: input.name,
+        email: input.email,
+        serviceId: input.serviceId,
+        serviceName: service.name,
+        priceCents: service.priceCents,
+        date,
+        time: input.time,
+        address: input.address,
+        createdAt,
+        cleanerName: cleaner.name,
+        subscriptionId,
+      });
+    }
+
+    database.exec("COMMIT;");
+
+    return {
+      status: "created",
+      subscription: {
+        id: subscriptionId,
+        name: input.name,
+        email: input.email,
+        address: input.address,
+        serviceId: input.serviceId,
+        serviceName: service.name,
+        priceCents: service.priceCents,
+        frequency: input.frequency,
+        preferredDay: preferredDayName,
+        startDate: input.startDate,
+        endDate: input.endDate ?? null,
+        time: input.time,
+        cleanerName: cleaner.name,
+        createdAt,
+        status: "active",
+        idempotencyKey: input.idempotencyKey ?? null,
+        nextServiceDate,
+        scheduledCount: createdBookings.length,
+      },
+      bookings: createdBookings,
+    };
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+export function getSubscription(id: string) {
+  const database = getDatabase();
+  const subRow = database
+    .prepare(
+      `SELECT subscriptions.*, cleaners.name AS cleaner_name
+       FROM subscriptions
+       JOIN cleaners ON cleaners.id = subscriptions.cleaner_id
+       WHERE subscriptions.id = ?`,
+    )
+    .get(id) as StoredSubscription | undefined;
+
+  if (!subRow) return null;
+
+  const bookings = database
+    .prepare(
+      `SELECT bookings.*, cleaners.name AS cleaner_name
+       FROM bookings
+       JOIN cleaners ON cleaners.id = bookings.cleaner_id
+       WHERE subscription_id = ?
+       ORDER BY service_date ASC`,
+    )
+    .all(id) as StoredBooking[];
+
+  const nextServiceDate =
+    bookings.length > 0 ? bookings[0].service_date : subRow.start_date;
+
+  return {
+    subscription: toSubscription(subRow, subRow.cleaner_name, nextServiceDate),
+    bookings: bookings.map(toBooking),
+  };
 }
 
 export function getBooking(id: string) {

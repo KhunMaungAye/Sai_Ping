@@ -21,7 +21,17 @@ Open http://localhost:3000. The SQLite database is created automatically at `dat
 ```bash
 npm run lint
 npm run build
+npm test
 ```
+
+## Recurring cleaning subscriptions
+
+- Customers can choose between single bookings, weekly subscriptions, or biweekly subscriptions.
+- Customers select their preferred day of the week and start date, with the next scheduled service date displayed before confirmation.
+- Subscriptions support an optional end date (or schedule horizon).
+- Cleaner availability across all recurring dates is validated atomically in SQLite (`BEGIN IMMEDIATE;`). If any date is unavailable, no partial bookings are created and the conflict date is returned.
+- Duplicate submissions are safeguarded using idempotency keys and transactional locking.
+- Date arithmetic handles month, leap year, and year boundaries via UTC calendar math without timezone shifts.
 
 ## Booking rules
 
