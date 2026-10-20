@@ -467,6 +467,12 @@ export default function Home() {
           ) : null}
           <Link
             className="text-link"
+            href="/bookings"
+          >
+            View all my bookings
+          </Link>
+          <Link
+            className="text-link"
             href="/"
             onClick={() => {
               setConfirmation(null);
@@ -520,6 +526,12 @@ export default function Home() {
             href={`/rate/${encodeURIComponent(confirmation.id)}`}
           >
             View booking and rate your cleaner
+          </Link>
+          <Link
+            className="text-link"
+            href="/bookings"
+          >
+            View all my bookings
           </Link>
           <Link
             className="text-link"
@@ -989,7 +1001,11 @@ function Header() {
         <span>Sai Ping</span>
       </Link>
       <span className="topbar-note">A little more room to breathe.</span>
-      <span className="topbar-contact">Home appointments</span>
+      <div className="topbar-nav">
+        <Link className="topbar-link" href="/bookings">
+          My bookings
+        </Link>
+      </div>
     </header>
   );
 }

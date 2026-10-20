@@ -56,6 +56,26 @@ export type Booking = BookingInput & {
   subscriptionId?: string | null;
 };
 
+export type CustomerBooking = {
+  id: string;
+  name: string;
+  email: string;
+  serviceId: ServiceId;
+  serviceName: string;
+  priceCents: number;
+  date: string;
+  time: BookingTime;
+  address: string;
+  createdAt: string;
+  cleanerId: string;
+  cleanerName: string;
+  status: "scheduled" | "completed";
+  statusLabel: string;
+  subscriptionId: string | null;
+  rating: number | null;
+  isUpcoming: boolean;
+};
+
 export type BookingRatingDetails = {
   id: string;
   serviceName: string;
@@ -234,6 +254,13 @@ function initDatabaseSchema(database: DatabaseSync) {
       idempotency_key TEXT UNIQUE,
       created_at TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled'))
+    );
+
+    CREATE TABLE IF NOT EXISTS customer_sessions (
+      token TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
     );
   `);
 }
@@ -829,3 +856,126 @@ export function submitBookingRating(id: string, stars: number) {
     throw error;
   }
 }
+
+export function getCustomerBookings(customerEmail: string) {
+  const database = getDatabase();
+  const normalizedEmail = customerEmail.trim().toLowerCase();
+
+  const rows = database
+    .prepare(
+      `
+      SELECT
+        bookings.id,
+        bookings.name,
+        bookings.email,
+        bookings.service_id,
+        bookings.service_name,
+        bookings.price_cents,
+        bookings.service_date,
+        bookings.time_slot,
+        bookings.address,
+        bookings.created_at,
+        bookings.cleaner_id,
+        cleaners.name AS cleaner_name,
+        bookings.status,
+        bookings.subscription_id,
+        ratings.stars AS rating
+      FROM bookings
+      JOIN cleaners ON cleaners.id = bookings.cleaner_id
+      LEFT JOIN ratings ON ratings.booking_id = bookings.id
+      WHERE LOWER(bookings.email) = ?
+      ORDER BY bookings.service_date ASC, bookings.time_slot ASC
+    `,
+    )
+    .all(normalizedEmail) as Array<{
+      id: string;
+      name: string;
+      email: string;
+      service_id: ServiceId;
+      service_name: string;
+      price_cents: number;
+      service_date: string;
+      time_slot: BookingTime;
+      address: string;
+      created_at: string;
+      cleaner_id: string;
+      cleaner_name: string;
+      status: "scheduled" | "completed";
+      subscription_id: string | null;
+      rating: number | null;
+    }>;
+
+  const today = localDateString();
+
+  const all: CustomerBooking[] = rows.map((row) => {
+    const isUpcoming = row.status === "scheduled" && row.service_date >= today;
+    const statusLabel = row.status === "completed" ? "Completed" : "Scheduled";
+
+    return {
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      serviceId: row.service_id,
+      serviceName: row.service_name,
+      priceCents: row.price_cents,
+      date: row.service_date,
+      time: row.time_slot,
+      address: row.address,
+      createdAt: row.created_at,
+      cleanerId: row.cleaner_id,
+      cleanerName: row.cleaner_name,
+      status: row.status,
+      statusLabel,
+      subscriptionId: row.subscription_id ?? null,
+      rating: row.rating ?? null,
+      isUpcoming,
+    };
+  });
+
+  const upcoming = all.filter((b) => b.isUpcoming);
+  // Sort previous descending (latest date first)
+  const previous = all
+    .filter((b) => !b.isUpcoming)
+    .sort((a, b) => {
+      if (b.date !== a.date) return b.date.localeCompare(a.date);
+      return b.time.localeCompare(a.time);
+    });
+
+  return {
+    customerEmail: normalizedEmail,
+    bookings: all,
+    upcoming,
+    previous,
+  };
+}
+
+export function createCustomerSession(email: string, durationDays = 7): string {
+  const token = randomUUID();
+  const now = new Date();
+  const expires = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+  getDatabase()
+    .prepare(
+      "INSERT INTO customer_sessions (token, email, created_at, expires_at) VALUES (?, ?, ?, ?)",
+    )
+    .run(token, email.trim().toLowerCase(), now.toISOString(), expires.toISOString());
+  return token;
+}
+
+export function getCustomerFromSessionToken(token: string): string | null {
+  if (!token || typeof token !== "string") return null;
+  const now = new Date().toISOString();
+  const row = getDatabase()
+    .prepare(
+      "SELECT email FROM customer_sessions WHERE token = ? AND expires_at > ?",
+    )
+    .get(token, now) as { email: string } | undefined;
+  return row ? row.email.toLowerCase() : null;
+}
+
+export function deleteCustomerSession(token: string): void {
+  if (!token || typeof token !== "string") return;
+  getDatabase()
+    .prepare("DELETE FROM customer_sessions WHERE token = ?")
+    .run(token);
+}
+

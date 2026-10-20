@@ -17,7 +17,11 @@ export default function RateBookingPage({
           <span>Sai Ping</span>
         </Link>
         <span className="topbar-note">Home cleaning, made simple.</span>
-        <span className="topbar-contact">Customer feedback</span>
+        <div className="topbar-nav">
+          <Link className="topbar-link" href="/bookings">
+            My bookings
+          </Link>
+        </div>
       </header>
       <Suspense fallback={<p className="rating-message">Loading booking…</p>}>
         <RatingPageContent params={params} />

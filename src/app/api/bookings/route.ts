@@ -1,6 +1,7 @@
 import {
   createBooking,
   createRecurringSubscription,
+  getCustomerBookings,
   getNextServiceDate,
   isBookableDate,
   isBookableTime,
@@ -12,6 +13,7 @@ import {
   type Frequency,
   type SubscriptionInput,
 } from "../../../lib/booking-store.ts";
+import { getAuthenticatedCustomer } from "../../../lib/auth.ts";
 
 function text(value: unknown, limit: number) {
   return typeof value === "string" ? value.trim().slice(0, limit) : "";
@@ -19,6 +21,41 @@ function text(value: unknown, limit: number) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export async function GET(request: Request) {
+  const customer = getAuthenticatedCustomer(request);
+
+  if (!customer) {
+    return Response.json(
+      { error: "Unauthorized. Please sign in to view your bookings." },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  try {
+    const { bookings, upcoming, previous, customerEmail } = getCustomerBookings(
+      customer.email,
+    );
+
+    return Response.json(
+      {
+        customer: { email: customerEmail },
+        bookings,
+        upcoming,
+        previous,
+      },
+      {
+        status: 200,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
+  } catch {
+    return Response.json(
+      { error: "Could not retrieve bookings. Please try again." },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
+    );
+  }
 }
 
 export async function POST(request: Request) {
