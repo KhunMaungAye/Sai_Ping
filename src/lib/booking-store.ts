@@ -262,6 +262,32 @@ function initDatabaseSchema(database: DatabaseSync) {
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('customer', 'cleaner', 'admin')),
+      cleaner_id TEXT REFERENCES cleaners(id),
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      email TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('customer', 'cleaner', 'admin')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+
+    INSERT OR IGNORE INTO users (id, email, password_hash, name, role, cleaner_id, status, created_at)
+    VALUES 
+      ('user-customer-001', 'customer@saiping.com', '$2b$10$ToODN36bWH81uUipsUSRyusZosG/NjJPRN1HJaEuN8hMY.5W8oqvK', 'Alice Customer', 'customer', NULL, 'active', '2026-01-01T00:00:00.000Z'),
+      ('user-cleaner-001', 'cleaner@saiping.com', '$2b$10$L3zIng8mu2OrkBZWfjbtQex/goPsLYva5C3n/XqnMcRD3qt3xH/CO', 'Sai Ping Cleaner', 'cleaner', '${DEFAULT_CLEANER.id}', 'active', '2026-01-01T00:00:00.000Z'),
+      ('user-admin-001', 'admin@saiping.com', '$2b$10$qDP8DUieLBSw2LaudMy.0e4IKK3ssHw21I/VdyuLcsI0425P3zTzm', 'System Administrator', 'admin', NULL, 'active', '2026-01-01T00:00:00.000Z');
   `);
 }
 
@@ -973,9 +999,424 @@ export function getCustomerFromSessionToken(token: string): string | null {
 }
 
 export function deleteCustomerSession(token: string): void {
+  deleteSession(token);
+}
+
+export type UserRole = "customer" | "cleaner" | "admin";
+export type UserStatus = "active" | "suspended";
+
+export type User = {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  cleanerId: string | null;
+  status: UserStatus;
+  createdAt: string;
+};
+
+export type StoredUser = User & {
+  password_hash: string;
+};
+
+export type Session = {
+  token: string;
+  userId: string;
+  email: string;
+  role: UserRole;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export function createUser(input: {
+  email: string;
+  passwordHash: string;
+  name: string;
+  role: UserRole;
+  cleanerId?: string | null;
+  status?: UserStatus;
+}): User {
+  const database = getDatabase();
+  const id = randomUUID();
+  const createdAt = new Date().toISOString();
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const status = input.status ?? "active";
+  const cleanerId = input.cleanerId ?? null;
+
+  database
+    .prepare(
+      `INSERT INTO users (id, email, password_hash, name, role, cleaner_id, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      id,
+      normalizedEmail,
+      input.passwordHash,
+      input.name.trim(),
+      input.role,
+      cleanerId,
+      status,
+      createdAt
+    );
+
+  return {
+    id,
+    email: normalizedEmail,
+    name: input.name.trim(),
+    role: input.role,
+    cleanerId,
+    status,
+    createdAt,
+  };
+}
+
+export function getUserByEmail(email: string): StoredUser | null {
+  if (!email || typeof email !== "string") return null;
+  const normalized = email.trim().toLowerCase();
+  const row = getDatabase()
+    .prepare("SELECT * FROM users WHERE LOWER(email) = ?")
+    .get(normalized) as
+    | {
+        id: string;
+        email: string;
+        password_hash: string;
+        name: string;
+        role: UserRole;
+        cleaner_id: string | null;
+        status: UserStatus;
+        created_at: string;
+      }
+    | undefined;
+
+  if (!row) return null;
+  return {
+    id: row.id,
+    email: row.email,
+    password_hash: row.password_hash,
+    name: row.name,
+    role: row.role,
+    cleanerId: row.cleaner_id,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+export function getUserById(id: string): User | null {
+  if (!id || typeof id !== "string") return null;
+  const row = getDatabase()
+    .prepare("SELECT id, email, name, role, cleaner_id, status, created_at FROM users WHERE id = ?")
+    .get(id) as
+    | {
+        id: string;
+        email: string;
+        name: string;
+        role: UserRole;
+        cleaner_id: string | null;
+        status: UserStatus;
+        created_at: string;
+      }
+    | undefined;
+
+  if (!row) return null;
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    cleanerId: row.cleaner_id,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+export function updateUserStatus(userId: string, status: UserStatus): boolean {
+  const result = getDatabase()
+    .prepare("UPDATE users SET status = ? WHERE id = ?")
+    .run(status, userId);
+  return result.changes > 0;
+}
+
+export function listUsers(): User[] {
+  const rows = getDatabase()
+    .prepare("SELECT id, email, name, role, cleaner_id, status, created_at FROM users ORDER BY created_at DESC")
+    .all() as Array<{
+      id: string;
+      email: string;
+      name: string;
+      role: UserRole;
+      cleaner_id: string | null;
+      status: UserStatus;
+      created_at: string;
+    }>;
+
+  return rows.map((r) => ({
+    id: r.id,
+    email: r.email,
+    name: r.name,
+    role: r.role,
+    cleanerId: r.cleaner_id,
+    status: r.status,
+    createdAt: r.created_at,
+  }));
+}
+
+export function createUserSession(userId: string, durationDays = 7): Session {
+  const database = getDatabase();
+  const user = getUserById(userId);
+  if (!user) throw new Error("User not found");
+
+  const token = randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + durationDays * 86400000).toISOString();
+  const createdAt = now.toISOString();
+
+  database
+    .prepare(
+      "INSERT INTO sessions (token, user_id, email, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .run(token, user.id, user.email, user.role, createdAt, expiresAt);
+
+  if (user.role === "customer") {
+    database
+      .prepare(
+        "INSERT OR REPLACE INTO customer_sessions (token, email, created_at, expires_at) VALUES (?, ?, ?, ?)"
+      )
+      .run(token, user.email, createdAt, expiresAt);
+  }
+
+  return {
+    token,
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    createdAt,
+    expiresAt,
+  };
+}
+
+export function getSession(token: string): Session | null {
+  if (!token || typeof token !== "string") return null;
+  const now = new Date().toISOString();
+  const database = getDatabase();
+
+  const sessionRow = database
+    .prepare("SELECT * FROM sessions WHERE token = ? AND expires_at > ?")
+    .get(token, now) as
+    | {
+        token: string;
+        user_id: string;
+        email: string;
+        role: UserRole;
+        created_at: string;
+        expires_at: string;
+      }
+    | undefined;
+
+  if (sessionRow) {
+    return {
+      token: sessionRow.token,
+      userId: sessionRow.user_id,
+      email: sessionRow.email,
+      role: sessionRow.role,
+      createdAt: sessionRow.created_at,
+      expiresAt: sessionRow.expires_at,
+    };
+  }
+
+  const custRow = database
+    .prepare("SELECT * FROM customer_sessions WHERE token = ? AND expires_at > ?")
+    .get(token, now) as
+    | {
+        token: string;
+        email: string;
+        created_at: string;
+        expires_at: string;
+      }
+    | undefined;
+
+  if (custRow) {
+    const user = getUserByEmail(custRow.email);
+    return {
+      token: custRow.token,
+      userId: user ? user.id : "legacy-customer",
+      email: custRow.email,
+      role: user ? user.role : "customer",
+      createdAt: custRow.created_at,
+      expiresAt: custRow.expires_at,
+    };
+  }
+
+  return null;
+}
+
+export function deleteSession(token: string): void {
   if (!token || typeof token !== "string") return;
-  getDatabase()
-    .prepare("DELETE FROM customer_sessions WHERE token = ?")
-    .run(token);
+  const database = getDatabase();
+  database.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+  database.prepare("DELETE FROM customer_sessions WHERE token = ?").run(token);
+}
+
+export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
+  const database = getDatabase();
+  const rows = database
+    .prepare(
+      `SELECT
+        bookings.id,
+        bookings.name,
+        bookings.email,
+        bookings.service_id,
+        bookings.service_name,
+        bookings.price_cents,
+        bookings.service_date,
+        bookings.time_slot,
+        bookings.address,
+        bookings.created_at,
+        bookings.cleaner_id,
+        cleaners.name AS cleaner_name,
+        bookings.status,
+        bookings.subscription_id,
+        ratings.stars AS rating
+      FROM bookings
+      JOIN cleaners ON cleaners.id = bookings.cleaner_id
+      LEFT JOIN ratings ON ratings.booking_id = bookings.id
+      WHERE bookings.cleaner_id = ?
+      ORDER BY bookings.service_date ASC, bookings.time_slot ASC`
+    )
+    .all(cleanerId) as Array<{
+      id: string;
+      name: string;
+      email: string;
+      service_id: ServiceId;
+      service_name: string;
+      price_cents: number;
+      service_date: string;
+      time_slot: BookingTime;
+      address: string;
+      created_at: string;
+      cleaner_id: string;
+      cleaner_name: string;
+      status: "scheduled" | "completed";
+      subscription_id: string | null;
+      rating: number | null;
+    }>;
+
+  const today = localDateString();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    serviceId: row.service_id,
+    serviceName: row.service_name,
+    priceCents: row.price_cents,
+    date: row.service_date,
+    time: row.time_slot,
+    address: row.address,
+    createdAt: row.created_at,
+    cleanerId: row.cleaner_id,
+    cleanerName: row.cleaner_name,
+    status: row.status,
+    statusLabel: row.status === "completed" ? "Completed" : "Scheduled",
+    subscriptionId: row.subscription_id ?? null,
+    rating: row.rating ?? null,
+    isUpcoming: row.status === "scheduled" && row.service_date >= today,
+  }));
+}
+
+export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: string }> {
+  const database = getDatabase();
+  const rows = database
+    .prepare(
+      `SELECT
+        bookings.id,
+        bookings.name,
+        bookings.email,
+        bookings.service_id,
+        bookings.service_name,
+        bookings.price_cents,
+        bookings.service_date,
+        bookings.time_slot,
+        bookings.address,
+        bookings.created_at,
+        bookings.cleaner_id,
+        cleaners.name AS cleaner_name,
+        bookings.status,
+        bookings.subscription_id,
+        ratings.stars AS rating
+      FROM bookings
+      JOIN cleaners ON cleaners.id = bookings.cleaner_id
+      LEFT JOIN ratings ON ratings.booking_id = bookings.id
+      ORDER BY bookings.service_date DESC, bookings.time_slot ASC`
+    )
+    .all() as Array<{
+      id: string;
+      name: string;
+      email: string;
+      service_id: ServiceId;
+      service_name: string;
+      price_cents: number;
+      service_date: string;
+      time_slot: BookingTime;
+      address: string;
+      created_at: string;
+      cleaner_id: string;
+      cleaner_name: string;
+      status: "scheduled" | "completed";
+      subscription_id: string | null;
+      rating: number | null;
+    }>;
+
+  const today = localDateString();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    customerName: row.name,
+    email: row.email,
+    serviceId: row.service_id,
+    serviceName: row.service_name,
+    priceCents: row.price_cents,
+    date: row.service_date,
+    time: row.time_slot,
+    address: row.address,
+    createdAt: row.created_at,
+    cleanerId: row.cleaner_id,
+    cleanerName: row.cleaner_name,
+    status: row.status,
+    statusLabel: row.status === "completed" ? "Completed" : "Scheduled",
+    subscriptionId: row.subscription_id ?? null,
+    rating: row.rating ?? null,
+    isUpcoming: row.status === "scheduled" && row.service_date >= today,
+  }));
+}
+
+export function getPlatformStats(): {
+  totalBookings: number;
+  scheduledBookings: number;
+  completedBookings: number;
+  totalUsers: number;
+  totalRevenueCents: number;
+} {
+  const database = getDatabase();
+  const bookingStats = database
+    .prepare(
+      `SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'scheduled' THEN 1 ELSE 0 END) as scheduled,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        COALESCE(SUM(price_cents), 0) as totalRevenue
+       FROM bookings`
+    )
+    .get() as { total: number; scheduled: number; completed: number; totalRevenue: number };
+
+  const userStats = database
+    .prepare("SELECT COUNT(*) as totalUsers FROM users")
+    .get() as { totalUsers: number };
+
+  return {
+    totalBookings: bookingStats?.total ?? 0,
+    scheduledBookings: bookingStats?.scheduled ?? 0,
+    completedBookings: bookingStats?.completed ?? 0,
+    totalUsers: userStats?.totalUsers ?? 0,
+    totalRevenueCents: bookingStats?.totalRevenue ?? 0,
+  };
 }
 

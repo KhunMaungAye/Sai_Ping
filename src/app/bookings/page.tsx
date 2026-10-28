@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { CustomerBooking } from "@/lib/booking-store";
 
 function displayDate(value: string) {
@@ -33,6 +34,7 @@ function displayPrice(cents: number) {
 type TabType = "upcoming" | "previous" | "all";
 
 export default function CustomerBookingsPage() {
+  const router = useRouter();
   const [authStatus, setAuthStatus] = useState<
     "loading" | "authenticated" | "unauthorized"
   >("loading");
@@ -43,11 +45,6 @@ export default function CustomerBookingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>("upcoming");
   const [apiError, setApiError] = useState("");
   const [refresh, setRefresh] = useState(0);
-
-  // Sign-in form state (for unauthenticated visitors)
-  const [loginEmail, setLoginEmail] = useState("");
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [loginError, setLoginError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -62,6 +59,12 @@ export default function CustomerBookingsPage() {
           setUpcomingBookings([]);
           setPreviousBookings([]);
           setAllBookings([]);
+          router.replace("/login?redirect=/bookings");
+          return;
+        }
+
+        if (response.status === 403) {
+          router.replace("/unauthorized");
           return;
         }
 
@@ -91,41 +94,7 @@ export default function CustomerBookingsPage() {
       });
 
     return () => controller.abort();
-  }, [refresh]);
-
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoginError("");
-
-    if (!loginEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail.trim())) {
-      setLoginError("Please enter a valid email address.");
-      return;
-    }
-
-    setIsLoggingIn(true);
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail.trim() }),
-      });
-
-      const result = (await response.json().catch(() => null)) as {
-        success?: boolean;
-        error?: string;
-      } | null;
-
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error ?? "Sign in failed. Please try again.");
-      }
-
-      setRefresh((val) => val + 1);
-    } catch (err) {
-      setLoginError(err instanceof Error ? err.message : "Sign in failed.");
-    } finally {
-      setIsLoggingIn(false);
-    }
-  }
+  }, [refresh, router]);
 
   async function handleSignOut() {
     try {
@@ -138,7 +107,7 @@ export default function CustomerBookingsPage() {
     setPreviousBookings([]);
     setAllBookings([]);
     setAuthStatus("unauthorized");
-    setLoginEmail("");
+    router.push("/login");
   }
 
   return (
@@ -193,40 +162,16 @@ export default function CustomerBookingsPage() {
             </span>
             <h2 id="signin-heading">Sign in to view your bookings</h2>
             <p className="auth-description">
-              Enter the email address you used when booking a cleaning. We will retrieve all your upcoming and past appointments.
+              Please sign in with your customer account to view your scheduled appointments and service history.
             </p>
 
-            <form onSubmit={handleLogin} className="auth-form" noValidate>
-              <label className="field-label" htmlFor="auth-email">
-                Email address
-              </label>
-              <input
-                id="auth-email"
-                type="email"
-                className="text-input"
-                placeholder="you@example.com"
-                value={loginEmail}
-                required
-                onChange={(e) => {
-                  setLoginEmail(e.target.value);
-                  setLoginError("");
-                }}
-              />
-
-              {loginError ? (
-                <div className="form-error" role="alert">
-                  {loginError}
-                </div>
-              ) : null}
-
-              <button
-                type="submit"
-                className="confirm-button auth-submit-btn"
-                disabled={isLoggingIn || !loginEmail.trim()}
-              >
-                {isLoggingIn ? "Signing in…" : "View my bookings"}
-              </button>
-            </form>
+            <Link
+              href="/login?redirect=/bookings"
+              className="confirm-button auth-submit-btn"
+              style={{ display: "grid", placeItems: "center", textDecoration: "none" }}
+            >
+              Sign in to your account
+            </Link>
 
             <div className="auth-hint">
               <span>Looking to schedule a new clean instead?</span>{" "}

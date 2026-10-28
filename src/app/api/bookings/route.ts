@@ -13,7 +13,7 @@ import {
   type Frequency,
   type SubscriptionInput,
 } from "../../../lib/booking-store.ts";
-import { getAuthenticatedCustomer } from "../../../lib/auth.ts";
+import { getAuthenticatedUser } from "../../../lib/auth.ts";
 
 function text(value: unknown, limit: number) {
   return typeof value === "string" ? value.trim().slice(0, limit) : "";
@@ -24,18 +24,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export async function GET(request: Request) {
-  const customer = getAuthenticatedCustomer(request);
+  const user = getAuthenticatedUser(request);
 
-  if (!customer) {
+  if (!user) {
     return Response.json(
       { error: "Unauthorized. Please sign in to view your bookings." },
       { status: 401, headers: { "Cache-Control": "no-store" } },
     );
   }
 
+  if (user.role !== "customer") {
+    return Response.json(
+      { error: "Forbidden. Customer access required." },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   try {
     const { bookings, upcoming, previous, customerEmail } = getCustomerBookings(
-      customer.email,
+      user.email,
     );
 
     return Response.json(

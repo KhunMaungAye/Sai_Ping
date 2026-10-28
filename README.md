@@ -24,6 +24,59 @@ npm run build
 npm test
 ```
 
+## Role-Based Authentication System (US-12)
+
+Sai Ping supports role-based authentication with three roles:
+
+- **Customer**: Access to the customer bookings dashboard (`/bookings`), viewing personal appointments, and submitting cleaner ratings.
+- **Cleaner**: Access to the cleaner job dashboard (`/dashboard/cleaner`), viewing assigned cleaning jobs, and marking completed cleanings.
+- **Admin**: Access to the administrator control panel (`/dashboard/admin`), viewing platform-wide booking metrics, managing bookings, and toggling user account status (Active / Suspended).
+
+### Seed Development Accounts
+
+Pre-seeded accounts are initialized automatically in the SQLite database:
+
+| Role | Email | Password | Assigned Dashboard |
+| --- | --- | --- | --- |
+| **Customer** | `customer@saiping.com` | `CustomerPassword123!` | `/bookings` |
+| **Cleaner** | `cleaner@saiping.com` | `CleanerPassword123!` | `/dashboard/cleaner` |
+| **Admin** | `admin@saiping.com` | `AdminPassword123!` | `/dashboard/admin` |
+
+### Authentication Architecture
+
+- **Dedicated Sign-in**: Located at `/login`. Features email and password fields, show/hide password toggle, accessible loading states, and redirect preservation.
+- **Password Security**: Passwords are saved as bcrypt hashes (`cost factor = 10`) with individual salts. Passwords and hashes are never returned in API responses or logs.
+- **Session Persistence**: Sessions are tracked in the SQLite `sessions` table and authenticated via `HttpOnly`, `SameSite=Lax` cookies (`session_token`), with `Secure` flags in production.
+- **Role Guards**: Backend route handlers enforce role-based access control. Unauthenticated requests receive `401 Unauthorized`; authenticated requests lacking required roles receive `403 Forbidden`. Client-supplied role query parameters and headers are strictly ignored.
+- **Central Role Router**: Navigating to `/dashboard` automatically checks the user's authenticated session and redirects them to their role-specific dashboard.
+- **Access Restrictions**: Attempting to access an unauthorized route redirects to `/unauthorized`.
+- **Sign Out**: The `/api/auth/logout` endpoint deletes the session record from SQLite and clears the authentication cookies (`Max-Age=0`). Suspended accounts immediately have all sessions revoked.
+
+### Role Permissions & API Endpoints
+
+| Endpoint | Method | Allowed Roles | Description |
+| --- | --- | --- | --- |
+| `/api/auth/login` | `POST` | Public | Authenticates credentials and sets persistent session cookie |
+| `/api/auth/logout` | `POST` | Authenticated | Revokes current session and clears authentication cookies |
+| `/api/auth/session` | `GET` | Public | Returns current session status and authenticated user details |
+| `/api/bookings` | `GET` | Customer | Returns customer's upcoming and previous bookings |
+| `/api/cleaner/bookings` | `GET` | Cleaner, Admin | Returns scheduled jobs assigned to the cleaner |
+| `/api/cleaner/bookings/[id]/complete` | `POST` | Cleaner, Admin | Marks assigned cleaning job as completed |
+| `/api/admin/bookings` | `GET` | Admin | Returns system-wide booking statistics and reservation history |
+| `/api/admin/users` | `GET` | Admin | Returns list of all registered platform user accounts |
+| `/api/admin/users/[id]/status` | `POST` | Admin | Updates user account status (`active` / `suspended`) |
+
+### Automated Test Suites
+
+Run all tests via:
+```bash
+npm test
+```
+
+- **`tests/auth.test.mjs`**: 19 tests covering login validation, bcrypt comparison, session creation, session invalidation on logout, RBAC guards, account suspension, and open redirect defense.
+- **`tests/customer-bookings.test.mjs`**: 8 tests covering customer booking retrieval, server-side data isolation, and query-parameter tampering prevention.
+- **`tests/recurring-cleaning.test.mjs`**: 11 tests covering recurring weekly/biweekly cleanings, conflict detection, and calendar math.
+
 ## Recurring cleaning subscriptions
 
 - Customers can choose between single bookings, weekly subscriptions, or biweekly subscriptions.

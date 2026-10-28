@@ -1005,6 +1005,9 @@ function Header() {
         <Link className="topbar-link" href="/bookings">
           My bookings
         </Link>
+        <Link className="topbar-link" href="/login">
+          Sign in
+        </Link>
       </div>
     </header>
   );
