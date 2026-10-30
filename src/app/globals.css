@@ -9,6 +9,9 @@
   --green: #176448;
   --green-dark: #104a36;
   --coral: #a53b2a;
+  --accent: var(--green);
+  --foreground: var(--ink);
+  --amber: #bb7414;
 }
 
 @theme inline {
@@ -1156,6 +1159,26 @@ a {
   background: #2b704d;
 }
 
+.status-badge-pending {
+  background: #fef8ee;
+  color: #b46b0a;
+  border: 1px solid #f6d8a7;
+}
+
+.status-badge-pending .status-indicator-dot {
+  background: #b46b0a;
+}
+
+.status-badge-accepted {
+  background: #eef6fc;
+  color: #1971c2;
+  border: 1px solid #b8dafc;
+}
+
+.status-badge-accepted .status-indicator-dot {
+  background: #1971c2;
+}
+
 .booking-card-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1636,3 +1659,203 @@ a {
 }
 
 
+
+/* Weekday availability chips (admin + cleaner) */
+.weekday-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.weekday-chip {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f2f0;
+  color: #a3aba6;
+}
+
+.weekday-chip.is-on {
+  background: #e8f4ec;
+  color: var(--green-dark);
+}
+
+.status-pill-guest {
+  background: #f1f2f0;
+  color: var(--muted);
+}
+
+/* Reviews */
+.review-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.review-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.review-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.review-card .rated-stars {
+  font-size: 16px;
+}
+
+.review-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.review-meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Cleaner availability editor */
+.availability-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 22px;
+}
+
+.availability-panel h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.availability-panel p {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.availability-toggles {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.availability-toggle {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px 4px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.availability-toggle[aria-pressed="true"] {
+  border-color: var(--green);
+  background: #e8f4ec;
+  color: var(--green-dark);
+}
+
+/* Customer day picker */
+.date-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.date-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 6px;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.date-option .day-name {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.date-option .day-number {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.date-option .day-slots {
+  font-size: 11px;
+  color: var(--green);
+}
+
+.date-option[aria-pressed="true"] {
+  border: 2px solid var(--green);
+  background: #f4faf6;
+}
+
+.date-option:disabled {
+  cursor: not-allowed;
+  background: #f6f7f5;
+  color: #aab2ad;
+}
+
+.date-option:disabled .day-slots {
+  color: #aab2ad;
+}
+
+/* Inline rating form on customer booking cards */
+.inline-rating {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inline-rating .rating-stars button {
+  width: 42px;
+  height: 42px;
+  font-size: 22px;
+}
+
+.review-textarea {
+  width: 100%;
+  min-height: 84px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  font: inherit;
+  resize: vertical;
+}
+
+.submitted-review {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--ink);
+  font-style: italic;
+}
+
+@media (max-width: 640px) {
+  .availability-toggles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

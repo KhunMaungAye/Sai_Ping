@@ -2,6 +2,7 @@ import { requireRole } from "../../../../../../lib/auth.ts";
 import {
   DEFAULT_CLEANER,
   getBooking,
+  getBookingAssignment,
   markBookingCompleted,
 } from "../../../../../../lib/booking-store.ts";
 
@@ -27,19 +28,32 @@ export async function POST(request: Request, { params }: RouteContext) {
   }
 
   const { user } = auth;
-  const assignedCleanerId = user.cleanerId || DEFAULT_CLEANER.id;
+  const assignment = getBookingAssignment(id);
+  const cleanerId = user.cleanerId || user.id;
 
-  // Cleaners can only complete bookings assigned to them
   if (user.role === "cleaner") {
-    // If booking already has a cleaner assigned and it's not this cleaner
-    const dbBooking = getBooking(id);
-    if (dbBooking && dbBooking.cleanerName !== user.name && dbBooking.cleanerName !== "Sai Ping Cleaning Team") {
+    if (!assignment?.acceptedById) {
+      return Response.json(
+        { error: "Accept this booking before marking it completed." },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    if (assignment.acceptedById !== cleanerId) {
       return Response.json(
         { error: "Forbidden. You can only complete your own assigned bookings." },
         { status: 403, headers: { "Cache-Control": "no-store" } },
       );
     }
   }
+
+  if (assignment?.status === "completed") {
+    return Response.json(
+      { success: true, status: "completed" },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const assignedCleanerId = assignment?.acceptedById || DEFAULT_CLEANER.id;
 
   try {
     const result = markBookingCompleted(id, assignedCleanerId);

@@ -1,5 +1,10 @@
 import { requireRole } from "../../../../lib/auth.ts";
-import { getCleanerBookings, DEFAULT_CLEANER } from "../../../../lib/booking-store.ts";
+import {
+  getCleanerBookings,
+  getAvailableBookingRequests,
+  getCleanerAvailableDays,
+  DEFAULT_CLEANER,
+} from "../../../../lib/booking-store.ts";
 
 export async function GET(request: Request) {
   const auth = requireRole(request, ["cleaner", "admin"]);
@@ -14,16 +19,20 @@ export async function GET(request: Request) {
   // If user is a cleaner, strictly use their assigned cleanerId
   const cleanerId =
     user.role === "cleaner"
-      ? (user.cleanerId || DEFAULT_CLEANER.id)
+      ? (user.cleanerId || user.id)
       : (new URL(request.url).searchParams.get("cleanerId") || user.cleanerId || DEFAULT_CLEANER.id);
 
   try {
     const bookings = getCleanerBookings(cleanerId);
+    const availableRequests = getAvailableBookingRequests();
+    const availableDays = getCleanerAvailableDays(cleanerId);
     return Response.json(
       {
         cleanerId,
         cleanerName: user.name,
         bookings,
+        availableRequests,
+        availableDays,
       },
       {
         status: 200,

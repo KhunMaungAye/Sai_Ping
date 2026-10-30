@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { dashboardPathFor, useSession } from "@/lib/use-session";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,41 +13,16 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [checkingSession, setCheckingSession] = useState(true);
+  const session = useSession();
+  const checkingSession =
+    session.status === "loading" || session.status === "ready";
 
   // If user is already authenticated, redirect them to their dashboard
   useEffect(() => {
-    const controller = new AbortController();
-
-    fetch("/api/auth/session", {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { authenticated?: boolean; user?: { role: string } } | null) => {
-        if (data?.authenticated && data.user) {
-          switch (data.user.role) {
-            case "admin":
-              router.replace("/dashboard/admin");
-              break;
-            case "cleaner":
-              router.replace("/dashboard/cleaner");
-              break;
-            case "customer":
-            default:
-              router.replace("/bookings");
-              break;
-          }
-        } else {
-          setCheckingSession(false);
-        }
-      })
-      .catch(() => {
-        setCheckingSession(false);
-      });
-
-    return () => controller.abort();
-  }, [router]);
+    if (session.status === "ready") {
+      router.replace(dashboardPathFor(session.user.role));
+    }
+  }, [session.status, session.user, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,7 +82,7 @@ export default function LoginPage() {
 
       // Navigate to destination returned by server
       const destination = data.redirectUrl || "/dashboard";
-      router.push(destination);
+      window.location.href = destination;
     } catch {
       setPassword("");
       setErrorMessage(
@@ -285,6 +261,15 @@ export default function LoginPage() {
                 type="button"
                 className="dev-account-btn"
                 onClick={() =>
+                  fillDevAccount("cleaner2@saiping.com", "Cleaner2Password123!")
+                }
+              >
+                🧽 Cleaner 2
+              </button>
+              <button
+                type="button"
+                className="dev-account-btn"
+                onClick={() =>
                   fillDevAccount("admin@saiping.com", "AdminPassword123!")
                 }
               >
@@ -294,10 +279,10 @@ export default function LoginPage() {
           </div>
 
           <div className="auth-hint">
-            <span>Want to schedule a home cleaning?</span>{" "}
-            <Link className="text-link" href="/" style={{ marginTop: 0 }}>
-              Book a cleaning
-            </Link>
+            <span>Customer, cleaner, or administrator?</span>{" "}
+            <span style={{ color: "var(--muted)", fontSize: "13px" }}>
+              Sign in above to access your role-specific portal.
+            </span>
           </div>
         </section>
       </div>
