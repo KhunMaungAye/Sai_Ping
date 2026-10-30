@@ -5,9 +5,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { SERVICES } from "@/lib/services";
 import { dashboardPathFor, useSession } from "@/lib/use-session";
-import { AuthModal } from "./components/auth-modal";
-import type { AuthMode, AuthRole } from "./components/auth-panel";
-import { BrandLogo } from "./components/brand-logo";
+import { AuthModal } from "./auth-modal";
+import type { AuthMode, AuthRole } from "./auth-panel";
+import { BrandLogo } from "./brand-logo";
 
 const NAV_LINKS = [
   { href: "#home", label: "Home" },
