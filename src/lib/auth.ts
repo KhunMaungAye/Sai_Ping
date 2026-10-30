@@ -307,3 +307,33 @@ export function getAuthenticatedCustomer(
 
   return null;
 }
+
+/**
+ * Response headers that sign the user in: the `session_token` cookie (plus the
+ * legacy `customer_session` cookie for customers) with a 7-day lifetime.
+ */
+export function sessionCookieHeaders(token: string, role: UserRole): Headers {
+  const isProd = process.env.NODE_ENV === "production";
+  const secureFlag = isProd ? "; Secure" : "";
+  const attributes = `Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secureFlag}`;
+  const headers = new Headers();
+  headers.append("Set-Cookie", `session_token=${encodeURIComponent(token)}; ${attributes}`);
+  if (role === "customer") {
+    headers.append("Set-Cookie", `customer_session=${encodeURIComponent(token)}; ${attributes}`);
+  }
+  headers.set("Cache-Control", "no-store");
+  return headers;
+}
+
+/**
+ * Password policy for self-registered accounts. Returns an error message, or
+ * null when the password is acceptable.
+ */
+export function passwordPolicyError(password: string): string | null {
+  if (password.length < 8) return "Password must be at least 8 characters.";
+  if (password.length > 128) return "Password must be 128 characters or fewer.";
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    return "Password must include at least one letter and one number.";
+  }
+  return null;
+}

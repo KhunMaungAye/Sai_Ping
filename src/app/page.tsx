@@ -1,5 +1,5 @@
-import RoleRouter from "./role-router";
+import HomePage from "./components/home-page";
 
 export default function RootHomePage() {
-  return <RoleRouter />;
+  return <HomePage />;
 }

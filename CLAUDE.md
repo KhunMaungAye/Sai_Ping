@@ -27,7 +27,7 @@ node --test tests/auth.test.mjs
 node --test --test-name-pattern="accepted by one cleaner" tests/roles-features.test.mjs
 ```
 
-Seeded dev logins (also on the login page's "Quick Dev Test Logins" buttons): `customer@saiping.com` / `CustomerPassword123!`, `cleaner@saiping.com` / `CleanerPassword123!` (works every day), `cleaner2@saiping.com` / `Cleaner2Password123!` (works Mon–Fri), `admin@saiping.com` / `AdminPassword123!`.
+Only one account is seeded: the admin, `admin@saiping.com` / `AdminPassword123!`. Customers and cleaners sign up through `POST /api/auth/register` (the home page Login pop-up or `/login` → Create account); admin can never be registered. A fresh database therefore has no bookable days until a cleaner signs up.
 
 ## Architecture
 
@@ -55,11 +55,11 @@ Plain `Request` → `Response.json` handlers, usually with `Cache-Control: no-st
 ### Pages: client components
 Every page is a `"use client"` component that fetches its data from the API in effects. There is no server-side auth or middleware; access control is enforced only by the API routes.
 - `src/lib/use-session.ts` → `useSession({ allowedRoles, loginRedirect })` loads `/api/auth/session` and redirects to `/login` or `/unauthorized`. It deliberately ignores aborted requests: React runs effects twice in development, and treating the aborted first fetch as "signed out" previously caused an endless `/login` ↔ dashboard redirect loop. Any new fetch effect should bail with `if (controller.signal.aborted) return;` in its `catch`.
-- `/` and `/dashboard` render `src/app/role-router.tsx`, which sends users to their role's page: customer → `/bookings`, cleaner → `/dashboard/cleaner`, admin → `/dashboard/admin` (`dashboardPathFor`).
+- `/` is the public home page (`src/app/components/home-page.tsx`). Its Login button opens `AuthModal`, which wraps the same `AuthPanel` (`src/app/components/`) that `/login` renders. `/dashboard` renders `src/app/components/role-router.tsx`, which sends users to their role's page: customer → `/bookings`, cleaner → `/dashboard/cleaner`, admin → `/dashboard/admin` (`dashboardPathFor`).
 - Styling is mostly hand-written classes in `src/app/globals.css` plus inline styles. Theme colours are CSS variables on `:root` (`--green`, `--ink`, `--muted`, `--line`, `--accent`, …). Check for existing class names before adding new ones: the file is large and collisions have happened (e.g. `.day-option`).
 
 ### Tests: `tests/*.test.mjs`
-`node:test` suites that import `src/lib/*.ts` and route handlers directly. Each test opens a fresh `new DatabaseSync(":memory:")` and installs it with `resetDatabaseForTesting(db)`, so the seed users and cleaners are always present. Requests are built as `new Request(url, { headers: { cookie: "session_token=..." } })` with tokens from `createUserSession(userId)`. Dynamic route handlers take `{ params: Promise.resolve({ id }) }`.
+`node:test` suites that import `src/lib/*.ts` and route handlers directly. Each test opens a fresh `new DatabaseSync(":memory:")`, installs it with `resetDatabaseForTesting(db)`, then calls `seedTestUsers()` from `tests/helpers/seed-test-users.mjs` to add the demo accounts (`customer@saiping.com` / `CustomerPassword123!`, `cleaner@saiping.com` / `CleanerPassword123!` working every day, `cleaner2@saiping.com` / `Cleaner2Password123!` working Mon–Fri). Requests are built as `new Request(url, { headers: { cookie: "session_token=..." } })` with tokens from `createUserSession(userId)`. Dynamic route handlers take `{ params: Promise.resolve({ id }) }`.
 
 ## Gotchas
 - The project sits in a Desktop folder that may be iCloud-synced. Duplicate files like `routes.d 4.ts` or `BUILD_ID 2` can appear in `.next/` and break `tsc` and `next build`. Deleting `.next` (or just the duplicates) fixes it.

@@ -22,6 +22,7 @@ import {
   GET as handleSubscriptionGET,
 } from "../src/app/api/subscriptions/route.ts";
 import { POST as handleBookingPOST } from "../src/app/api/bookings/route.ts";
+import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 
 describe("US-03: Set Up Recurring Cleaning", () => {
   let testDb;
@@ -29,6 +30,7 @@ describe("US-03: Set Up Recurring Cleaning", () => {
   beforeEach(() => {
     testDb = new DatabaseSync(":memory:");
     resetDatabaseForTesting(testDb);
+    seedTestUsers();
     getDatabase(); // initialize schema on testDb
   });
 

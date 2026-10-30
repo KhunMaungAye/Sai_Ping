@@ -18,6 +18,7 @@ import { PUT as availabilityPUT } from "../src/app/api/cleaner/availability/rout
 import { GET as daysGET } from "../src/app/api/availability/days/route.ts";
 import { POST as ratingPOST } from "../src/app/api/bookings/[id]/rating/route.ts";
 import { GET as overviewGET } from "../src/app/api/admin/overview/route.ts";
+import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 
 /** Next date (after today) that falls on the given weekday, 0 = Sunday. */
 function nextWeekday(weekday) {
@@ -67,6 +68,7 @@ describe("Cleaner availability, job ownership, reviews and admin overview", () =
   beforeEach(() => {
     testDb = new DatabaseSync(":memory:");
     resetDatabaseForTesting(testDb);
+    seedTestUsers();
     getDatabase();
   });
 

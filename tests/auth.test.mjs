@@ -20,6 +20,7 @@ import { POST as handleCleanerCompletePOST } from "../src/app/api/cleaner/bookin
 import { GET as handleAdminBookingsGET } from "../src/app/api/admin/bookings/route.ts";
 import { GET as handleAdminUsersGET } from "../src/app/api/admin/users/route.ts";
 import { POST as handleAdminUserStatusPOST } from "../src/app/api/admin/users/[id]/status/route.ts";
+import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 
 describe("US-12: Role-Based Authentication System", () => {
   let testDb;
@@ -27,6 +28,7 @@ describe("US-12: Role-Based Authentication System", () => {
   beforeEach(() => {
     testDb = new DatabaseSync(":memory:");
     resetDatabaseForTesting(testDb);
+    seedTestUsers();
     getDatabase(); // initialize schema on testDb (includes seed users)
   });
 
