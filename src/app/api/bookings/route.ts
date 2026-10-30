@@ -83,8 +83,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const name = text(body.name, 100);
-  const email = text(body.email, 254).toLowerCase();
+  // A signed-in customer always books for their own account.
+  const sessionUser = getAuthenticatedUser(request);
+  const accountHolder = sessionUser?.role === "customer" ? sessionUser : null;
+  const name = text(body.name, 100) || accountHolder?.name || "";
+  const email = accountHolder
+    ? accountHolder.email.toLowerCase()
+    : text(body.email, 254).toLowerCase();
   const address = text(body.address, 300);
   const date = text(body.date ?? body.startDate, 10);
   const serviceId = body.serviceId;
@@ -258,6 +263,16 @@ export async function POST(request: Request) {
 
   try {
     const result = createBooking(input);
+
+    if (result.status === "no-cleaner") {
+      return Response.json(
+        {
+          error: "No cleaners work on that day. Please choose another date.",
+          code: "DAY_UNAVAILABLE",
+        },
+        { status: 409 },
+      );
+    }
 
     if (result.status === "unavailable") {
       return Response.json(

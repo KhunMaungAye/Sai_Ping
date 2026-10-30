@@ -2,8 +2,26 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import type { CustomerBooking, User } from "@/lib/booking-store";
+import type {
+  AdminCleanerSummary,
+  AdminCustomerSummary,
+  AdminReview,
+  CustomerBooking,
+  User,
+} from "@/lib/booking-store";
+import { signOut, useSession } from "@/lib/use-session";
+
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function Stars({ value }: { value: number }) {
+  const rounded = Math.round(value);
+  return (
+    <span className="rated-stars" aria-label={`${value} out of 5 stars`}>
+      {"★".repeat(rounded)}
+      {"☆".repeat(5 - rounded)}
+    </span>
+  );
+}
 
 function displayDate(value: string) {
   if (!value) return "";
@@ -24,14 +42,19 @@ function displayPrice(cents: number) {
 type AdminBooking = CustomerBooking & { customerName?: string };
 
 export default function AdminDashboardPage() {
-  const router = useRouter();
+  const session = useSession({
+    allowedRoles: ["admin"],
+    loginRedirect: "/dashboard/admin",
+  });
+  const adminUser = session.user;
+  const authStatus = session.status === "ready" ? "authenticated" : "loading";
 
-  const [authStatus, setAuthStatus] = useState<
-    "loading" | "authenticated" | "unauthorized"
-  >("loading");
-  const [adminUser, setAdminUser] = useState<User | null>(null);
-
-  const [activeTab, setActiveTab] = useState<"bookings" | "users">("bookings");
+  const [activeTab, setActiveTab] = useState<
+    "bookings" | "cleaners" | "customers" | "reviews" | "users"
+  >("bookings");
+  const [cleaners, setCleaners] = useState<AdminCleanerSummary[]>([]);
+  const [customers, setCustomers] = useState<AdminCustomerSummary[]>([]);
+  const [reviews, setReviews] = useState<AdminReview[]>([]);
   const [stats, setStats] = useState({
     totalBookings: 0,
     scheduledBookings: 0,
@@ -45,33 +68,6 @@ export default function AdminDashboardPage() {
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
 
-  // Authenticate admin
-  useEffect(() => {
-    const controller = new AbortController();
-
-    fetch("/api/auth/session", { cache: "no-store", signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { authenticated?: boolean; user?: User } | null) => {
-        if (!data?.authenticated || !data.user) {
-          router.replace("/login?redirect=/dashboard/admin");
-          return;
-        }
-
-        if (data.user.role !== "admin") {
-          router.replace("/unauthorized");
-          return;
-        }
-
-        setAdminUser(data.user);
-        setAuthStatus("authenticated");
-      })
-      .catch(() => {
-        router.replace("/login?redirect=/dashboard/admin");
-      });
-
-    return () => controller.abort();
-  }, [router]);
-
   // Load platform data
   useEffect(() => {
     if (authStatus !== "authenticated") return;
@@ -84,8 +80,16 @@ export default function AdminDashboardPage() {
       fetch("/api/admin/users", { cache: "no-store", signal: controller.signal }).then((r) =>
         r.ok ? r.json() : null,
       ),
+      fetch("/api/admin/overview", { cache: "no-store", signal: controller.signal }).then((r) =>
+        r.ok ? r.json() : null,
+      ),
     ])
-      .then(([bookingData, userData]) => {
+      .then(([bookingData, userData, overview]) => {
+        if (overview) {
+          setCleaners(overview.cleaners ?? []);
+          setCustomers(overview.customers ?? []);
+          setReviews(overview.reviews ?? []);
+        }
         if (bookingData) {
           setStats(bookingData.stats);
           setBookings(bookingData.bookings ?? []);
@@ -95,7 +99,8 @@ export default function AdminDashboardPage() {
         }
       })
       .catch(() => {
-        setActionMessage("Could not refresh administrative records.");
+        if (controller.signal.aborted) return;
+        setActionMessage("Error: could not refresh administrative records.");
       });
 
     return () => controller.abort();
@@ -135,11 +140,19 @@ export default function AdminDashboardPage() {
     }
   }
 
-  async function handleSignOut() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } catch {}
-    router.replace("/login");
+  const handleSignOut = signOut;
+
+  if (session.status === "error") {
+    return (
+      <main className="app-shell">
+        <div className="dashboard-loading" role="alert">
+          <p>We couldn&apos;t reach the server to check your sign-in.</p>
+          <button type="button" className="inline-button" onClick={session.retry}>
+            Try again
+          </button>
+        </div>
+      </main>
+    );
   }
 
   if (authStatus === "loading") {
@@ -155,7 +168,7 @@ export default function AdminDashboardPage() {
         </header>
         <div className="dashboard-loading" role="status">
           <span className="dashboard-spinner" aria-hidden="true" />
-          <p>Verifying administrative privileges…</p>
+          <p>Verifying Admin Authorization…</p>
         </div>
       </main>
     );
@@ -164,24 +177,24 @@ export default function AdminDashboardPage() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <Link className="brand" href="/" aria-label="Sai Ping home">
-          <span className="brand-mark" aria-hidden="true">
-            S
-          </span>
-          <span>Sai Ping</span>
-        </Link>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span className="portal-badge portal-badge-admin">Admin Portal</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <Link className="brand" href="/dashboard/admin" aria-label="Sai Ping home">
+            <span className="brand-mark" aria-hidden="true">
+              S
+            </span>
+            <span>Sai Ping</span>
+          </Link>
+          <span className="role-pill role-pill-admin">ADMIN CONSOLE</span>
         </div>
         <div className="topbar-nav" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <span style={{ fontSize: "13px", color: "var(--muted)" }}>
-            {adminUser?.email}
+          <span className="topbar-user-email">
+            {adminUser?.name} ({adminUser?.email})
           </span>
           <button
             type="button"
             className="inline-button"
             onClick={handleSignOut}
-            style={{ color: "var(--coral)", textDecoration: "none" }}
+            style={{ color: "var(--muted)", textDecoration: "none" }}
           >
             Sign out
           </button>
@@ -190,10 +203,11 @@ export default function AdminDashboardPage() {
 
       <div className="dashboard-container">
         <div className="page-heading">
-          <p className="eyebrow">ADMINISTRATOR CONTROL PANEL</p>
-          <h1>Platform Operations & Security</h1>
+          <p className="eyebrow">ADMINISTRATIVE CONSOLE</p>
+          <h1>Platform Operations & Bookings</h1>
           <p>
-            System-wide oversight for bookings, cleaners, customer accounts, and access management.
+            Welcome, <strong>{adminUser?.name}</strong>. Monitor customer bookings, track cleaner
+            acceptance status, and manage platform user credentials.
           </p>
         </div>
 
@@ -253,8 +267,41 @@ export default function AdminDashboardPage() {
             className={`dashboard-tab${activeTab === "bookings" ? " is-active" : ""}`}
             onClick={() => setActiveTab("bookings")}
           >
-            <span>All Bookings</span>
+            <span>All Customer Bookings</span>
             <span className="tab-badge">{bookings.length}</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "cleaners"}
+            className={`dashboard-tab${activeTab === "cleaners" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("cleaners")}
+          >
+            <span>Cleaners</span>
+            <span className="tab-badge">{cleaners.length}</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "customers"}
+            className={`dashboard-tab${activeTab === "customers" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("customers")}
+          >
+            <span>Customers</span>
+            <span className="tab-badge">{customers.length}</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "reviews"}
+            className={`dashboard-tab${activeTab === "reviews" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("reviews")}
+          >
+            <span>Ratings & Reviews</span>
+            <span className="tab-badge">{reviews.length}</span>
           </button>
 
           <button
@@ -269,7 +316,7 @@ export default function AdminDashboardPage() {
           </button>
         </nav>
 
-        {/* Panel 1: All Bookings Table */}
+        {/* Panel 1: All Bookings Table with Cleaner Acceptance Information */}
         {activeTab === "bookings" ? (
           <section className="tab-panel">
             <div className="table-responsive-wrapper">
@@ -278,11 +325,11 @@ export default function AdminDashboardPage() {
                   <tr>
                     <th>Ref</th>
                     <th>Customer</th>
-                    <th>Service</th>
+                    <th>Service & Location</th>
                     <th>Date & Arrival</th>
-                    <th>Assigned Cleaner</th>
                     <th>Price</th>
-                    <th>Status</th>
+                    <th>Cleaner Acceptance</th>
+                    <th>Service Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -297,15 +344,41 @@ export default function AdminDashboardPage() {
                           <span style={{ fontSize: "11px", color: "var(--muted)" }}>{b.email}</span>
                         </div>
                       </td>
-                      <td>{b.serviceName}</td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <strong>{b.serviceName}</strong>
+                          <span style={{ fontSize: "11px", color: "var(--muted)" }}>{b.address}</span>
+                        </div>
+                      </td>
                       <td>
                         <div style={{ display: "flex", flexDirection: "column" }}>
                           <span>{displayDate(b.date)}</span>
                           <span style={{ fontSize: "11px", color: "var(--muted)" }}>{b.time}</span>
                         </div>
                       </td>
-                      <td>{b.cleanerName}</td>
-                      <td>{displayPrice(b.priceCents)}</td>
+                      <td>
+                        <strong>{displayPrice(b.priceCents)}</strong>
+                      </td>
+                      <td>
+                        {b.acceptedByName ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <span className="status-badge status-badge-accepted">
+                              <span className="status-indicator-dot" aria-hidden="true" />
+                              Accepted: {b.acceptedByName}
+                            </span>
+                            {b.acceptedAt ? (
+                              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                                {displayDate(b.acceptedAt.slice(0, 10))}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="status-badge status-badge-pending">
+                            <span className="status-indicator-dot" aria-hidden="true" />
+                            Awaiting Acceptance
+                          </span>
+                        )}
+                      </td>
                       <td>
                         <span
                           className={`status-badge ${
@@ -330,6 +403,176 @@ export default function AdminDashboardPage() {
                 </tbody>
               </table>
             </div>
+          </section>
+        ) : null}
+
+        {activeTab === "cleaners" ? (
+          <section className="tab-panel">
+            <div className="table-responsive-wrapper">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Cleaner</th>
+                    <th>Available Days</th>
+                    <th>Upcoming Jobs</th>
+                    <th>Completed</th>
+                    <th>Earnings</th>
+                    <th>Rating</th>
+                    <th>Account</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cleaners.map((c) => (
+                    <tr key={c.userId}>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <strong>{c.name}</strong>
+                          <span style={{ fontSize: "11px", color: "var(--muted)" }}>{c.email}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="weekday-chips">
+                          {WEEKDAY_SHORT.map((label, day) => (
+                            <span
+                              key={label}
+                              className={`weekday-chip${c.availableDays.includes(day) ? " is-on" : ""}`}
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td>{c.upcomingJobs}</td>
+                      <td>{c.completedJobs}</td>
+                      <td>
+                        <strong>{displayPrice(c.earningsCents)}</strong>
+                      </td>
+                      <td>
+                        {c.averageRating === null ? (
+                          <span style={{ fontSize: "12px", color: "var(--muted)" }}>No ratings yet</span>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <Stars value={c.averageRating} />
+                            <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                              {c.averageRating.toFixed(1)} from {c.reviewCount} review{c.reviewCount === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <span
+                          className={`status-pill ${
+                            c.status === "suspended" ? "status-pill-suspended" : "status-pill-active"
+                          }`}
+                        >
+                          {c.status === "suspended" ? "Suspended" : "Active"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {cleaners.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
+                        No cleaner accounts yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
+        {activeTab === "customers" ? (
+          <section className="tab-panel">
+            <div className="table-responsive-wrapper">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Bookings</th>
+                    <th>Upcoming</th>
+                    <th>Completed</th>
+                    <th>Total Spent</th>
+                    <th>Last Service</th>
+                    <th>Reviews</th>
+                    <th>Account</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.map((c) => (
+                    <tr key={c.email}>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <strong>{c.name}</strong>
+                          <span style={{ fontSize: "11px", color: "var(--muted)" }}>{c.email}</span>
+                        </div>
+                      </td>
+                      <td>{c.totalBookings}</td>
+                      <td>{c.upcomingBookings}</td>
+                      <td>{c.completedBookings}</td>
+                      <td>
+                        <strong>{displayPrice(c.totalSpentCents)}</strong>
+                      </td>
+                      <td>{c.lastServiceDate ? displayDate(c.lastServiceDate) : "—"}</td>
+                      <td>{c.reviewsWritten}</td>
+                      <td>
+                        <span
+                          className={`status-pill ${
+                            c.status === "suspended"
+                              ? "status-pill-suspended"
+                              : c.status === "guest"
+                                ? "status-pill-guest"
+                                : "status-pill-active"
+                          }`}
+                        >
+                          {c.status === "suspended" ? "Suspended" : c.status === "guest" ? "Guest" : "Active"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {customers.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
+                        No customers yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
+        {activeTab === "reviews" ? (
+          <section className="tab-panel">
+            {reviews.length === 0 ? (
+              <div className="empty-bookings-card">
+                <div className="empty-icon-circle" aria-hidden="true">
+                  ★
+                </div>
+                <h3>No reviews yet</h3>
+                <p>Customer ratings and reviews appear here once completed cleanings are rated.</p>
+              </div>
+            ) : (
+              <div className="review-list">
+                {reviews.map((r) => (
+                  <article key={r.bookingId} className="review-card">
+                    <div className="review-card-header">
+                      <Stars value={r.stars} />
+                      <span className="review-meta">{displayDate(r.createdAt.slice(0, 10))}</span>
+                    </div>
+                    <p className="review-text">
+                      {r.review ? `“${r.review}”` : <em style={{ color: "var(--muted)" }}>No written review</em>}
+                    </p>
+                    <p className="review-meta">
+                      <strong>{r.customerName}</strong> rated <strong>{r.cleanerName}</strong> ·{" "}
+                      {r.serviceName} on {displayDate(r.serviceDate)}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         ) : null}
 

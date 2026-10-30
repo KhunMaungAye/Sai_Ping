@@ -16,7 +16,7 @@ export default function UnauthorizedPage() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <Link className="brand" href="/" aria-label="Sai Ping home">
+        <Link className="brand" href="/dashboard" aria-label="Sai Ping home">
           <span className="brand-mark" aria-hidden="true">
             S
           </span>
@@ -24,8 +24,8 @@ export default function UnauthorizedPage() {
         </Link>
         <span className="topbar-note">A little more room to breathe.</span>
         <div className="topbar-nav">
-          <Link className="topbar-link" href="/">
-            Book a cleaning
+          <Link className="topbar-link" href="/dashboard">
+            Dashboard
           </Link>
         </div>
       </header>

@@ -69,10 +69,15 @@ export type CustomerBooking = {
   createdAt: string;
   cleanerId: string;
   cleanerName: string;
+  acceptedById?: string | null;
+  acceptedByName?: string | null;
+  acceptedAt?: string | null;
+  isAccepted?: boolean;
   status: "scheduled" | "completed";
   statusLabel: string;
   subscriptionId: string | null;
   rating: number | null;
+  review: string | null;
   isUpcoming: boolean;
 };
 
@@ -83,7 +88,10 @@ export type BookingRatingDetails = {
   status: "scheduled" | "completed";
   cleanerId: string;
   cleanerName: string;
+  customerEmail: string;
+  isAccepted: boolean;
   rating: number | null;
+  review: string | null;
 };
 
 export type SubscriptionInput = {
@@ -139,6 +147,9 @@ export const DEFAULT_CLEANER = {
   id: "cleaner-001",
   name: "Sai Ping Cleaning Team",
 } as const;
+
+/** Weekdays (0 = Sunday … 6 = Saturday) a new cleaner works unless they change it. */
+export const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
 
 type StoredBooking = {
   id: string;
@@ -206,6 +217,9 @@ function initDatabaseSchema(database: DatabaseSync) {
       created_at TEXT NOT NULL,
       cleaner_id TEXT NOT NULL DEFAULT '${DEFAULT_CLEANER.id}' REFERENCES cleaners(id),
       status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed')),
+      accepted_by_id TEXT,
+      accepted_by_name TEXT,
+      accepted_at TEXT,
       UNIQUE (service_date, time_slot)
     );
   `);
@@ -226,6 +240,24 @@ function initDatabaseSchema(database: DatabaseSync) {
   }
   if (!bookingColumns.some((column) => column.name === "subscription_id")) {
     database.exec("ALTER TABLE bookings ADD COLUMN subscription_id TEXT;");
+  }
+  if (!bookingColumns.some((column) => column.name === "accepted_by_id")) {
+    database.exec("ALTER TABLE bookings ADD COLUMN accepted_by_id TEXT;");
+  }
+  if (!bookingColumns.some((column) => column.name === "accepted_by_name")) {
+    database.exec("ALTER TABLE bookings ADD COLUMN accepted_by_name TEXT;");
+  }
+  if (!bookingColumns.some((column) => column.name === "accepted_at")) {
+    database.exec("ALTER TABLE bookings ADD COLUMN accepted_at TEXT;");
+  }
+
+  const cleanerColumns = database
+    .prepare("PRAGMA table_info(cleaners)")
+    .all() as { name: string }[];
+  if (!cleanerColumns.some((column) => column.name === "available_days")) {
+    database.exec(
+      `ALTER TABLE cleaners ADD COLUMN available_days TEXT NOT NULL DEFAULT '${ALL_WEEKDAYS.join(",")}';`,
+    );
   }
 
   database.exec(`
@@ -283,12 +315,23 @@ function initDatabaseSchema(database: DatabaseSync) {
       expires_at TEXT NOT NULL
     );
 
+    INSERT OR IGNORE INTO cleaners (id, name, available_days)
+    VALUES ('cleaner-002', 'Mia Cleaner', '1,2,3,4,5');
+
     INSERT OR IGNORE INTO users (id, email, password_hash, name, role, cleaner_id, status, created_at)
     VALUES 
+      ('user-cleaner-002', 'cleaner2@saiping.com', '$2b$10$5Pp0MY.PEkPMrpdc2.QSTOvzZ0vMbZF5P5B1nmjwYnomB7rL3Z1ve', 'Mia Cleaner', 'cleaner', 'cleaner-002', 'active', '2026-01-02T00:00:00.000Z'),
       ('user-customer-001', 'customer@saiping.com', '$2b$10$ToODN36bWH81uUipsUSRyusZosG/NjJPRN1HJaEuN8hMY.5W8oqvK', 'Alice Customer', 'customer', NULL, 'active', '2026-01-01T00:00:00.000Z'),
       ('user-cleaner-001', 'cleaner@saiping.com', '$2b$10$L3zIng8mu2OrkBZWfjbtQex/goPsLYva5C3n/XqnMcRD3qt3xH/CO', 'Sai Ping Cleaner', 'cleaner', '${DEFAULT_CLEANER.id}', 'active', '2026-01-01T00:00:00.000Z'),
       ('user-admin-001', 'admin@saiping.com', '$2b$10$qDP8DUieLBSw2LaudMy.0e4IKK3ssHw21I/VdyuLcsI0425P3zTzm', 'System Administrator', 'admin', NULL, 'active', '2026-01-01T00:00:00.000Z');
   `);
+
+  const ratingColumns = database
+    .prepare("PRAGMA table_info(ratings)")
+    .all() as { name: string }[];
+  if (!ratingColumns.some((column) => column.name === "review")) {
+    database.exec("ALTER TABLE ratings ADD COLUMN review TEXT;");
+  }
 }
 
 export function getDatabase(customPath?: string) {
@@ -351,7 +394,87 @@ export function isBookableTime(
   return hour * 60 + minute > now.getHours() * 60 + now.getMinutes();
 }
 
-export function listAvailableSlots(date: string) {
+function parseWeekdays(value: string | null | undefined): number[] {
+  if (!value) return [];
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((part) => Number(part.trim()))
+        .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6),
+    ),
+  ].sort((a, b) => a - b);
+}
+
+export function getCleanerAvailableDays(cleanerId: string): number[] {
+  const row = getDatabase()
+    .prepare("SELECT available_days FROM cleaners WHERE id = ?")
+    .get(cleanerId) as { available_days: string } | undefined;
+  return parseWeekdays(row?.available_days);
+}
+
+export function setCleanerAvailableDays(
+  cleanerId: string,
+  days: number[],
+): number[] {
+  const normalized = parseWeekdays(days.join(","));
+  getDatabase()
+    .prepare("UPDATE cleaners SET available_days = ? WHERE id = ?")
+    .run(normalized.join(","), cleanerId);
+  return normalized;
+}
+
+/**
+ * Weekdays covered by at least one active cleaner account.
+ * Customers can only book a date that falls on one of these days.
+ */
+export function getServicedWeekdays(): Set<number> {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT cleaners.available_days
+       FROM users
+       JOIN cleaners ON cleaners.id = users.cleaner_id
+       WHERE users.role = 'cleaner' AND users.status = 'active'`,
+    )
+    .all() as { available_days: string }[];
+
+  const days = new Set<number>();
+  for (const row of rows) {
+    for (const day of parseWeekdays(row.available_days)) days.add(day);
+  }
+  return days;
+}
+
+export function isServiceDayAvailable(date: string) {
+  return getServicedWeekdays().has(getDayOfWeekFromDateString(date));
+}
+
+export type AvailableDay = {
+  date: string;
+  dayName: DayOfWeekName;
+  availableSlots: BookingTime[];
+};
+
+/** Upcoming dates with their open arrival windows, for the customer day picker. */
+export function listAvailableDays(
+  startDate = localDateString(),
+  count = 21,
+): AvailableDay[] {
+  const days: AvailableDay[] = [];
+  for (let offset = 0; offset < count; offset++) {
+    const date = addDaysToDateString(startDate, offset);
+    days.push({
+      date,
+      dayName: getDayNameFromDateString(date),
+      availableSlots: listAvailableSlots(date),
+    });
+  }
+  return days;
+}
+
+export function listAvailableSlots(date: string): BookingTime[] {
+  if (!isServiceDayAvailable(date)) return [];
+
   const rows = getDatabase()
     .prepare("SELECT time_slot FROM bookings WHERE service_date = ?")
     .all(date) as { time_slot: string }[];
@@ -387,13 +510,14 @@ export function checkRecurringAvailability({
     preferredDay,
   });
 
+  const servicedDays = getServicedWeekdays();
   for (const date of dates) {
     const existing = database
       .prepare(
         "SELECT id FROM bookings WHERE service_date = ? AND time_slot = ?",
       )
       .get(date, time);
-    if (existing) {
+    if (existing || !servicedDays.has(getDayOfWeekFromDateString(date))) {
       return {
         available: false,
         conflictDate: date,
@@ -469,6 +593,11 @@ export function createBooking(input: BookingInput) {
 
   database.exec("BEGIN IMMEDIATE;");
   try {
+    if (!isServiceDayAvailable(input.date)) {
+      database.exec("ROLLBACK;");
+      return { status: "no-cleaner" as const };
+    }
+
     const existing = database
       .prepare(
         "SELECT id FROM bookings WHERE service_date = ? AND time_slot = ?",
@@ -593,6 +722,7 @@ export function createRecurringSubscription(
 
     // Edge Case 1: Cleaner unavailable on ANY recurring date.
     // Ensure atomic rollback so no partial/overlapping bookings are saved.
+    const servicedDays = getServicedWeekdays();
     for (const date of dates) {
       const conflict = database
         .prepare(
@@ -600,7 +730,7 @@ export function createRecurringSubscription(
         )
         .get(date, input.time);
 
-      if (conflict) {
+      if (conflict || !servicedDays.has(getDayOfWeekFromDateString(date))) {
         database.exec("ROLLBACK;");
         return {
           status: "conflict",
@@ -771,9 +901,13 @@ export function getBookingRatingDetails(
         bookings.service_name,
         bookings.service_date,
         bookings.status,
+        bookings.email,
+        bookings.accepted_by_id,
+        bookings.accepted_by_name,
         cleaners.id AS cleaner_id,
         cleaners.name AS cleaner_name,
-        ratings.stars AS rating
+        ratings.stars AS rating,
+        ratings.review AS review
       FROM bookings
       JOIN cleaners ON cleaners.id = bookings.cleaner_id
       LEFT JOIN ratings ON ratings.booking_id = bookings.id
@@ -786,9 +920,13 @@ export function getBookingRatingDetails(
         service_name: string;
         service_date: string;
         status: "scheduled" | "completed";
+        email: string;
+        accepted_by_id: string | null;
+        accepted_by_name: string | null;
         cleaner_id: string;
         cleaner_name: string;
         rating: number | null;
+        review: string | null;
       }
     | undefined;
 
@@ -799,8 +937,11 @@ export function getBookingRatingDetails(
     date: row.service_date,
     status: row.status,
     cleanerId: row.cleaner_id,
-    cleanerName: row.cleaner_name,
+    cleanerName: row.accepted_by_name || row.cleaner_name,
+    customerEmail: row.email.toLowerCase(),
+    isAccepted: Boolean(row.accepted_by_id),
     rating: row.rating,
+    review: row.review ?? null,
   };
 }
 
@@ -837,7 +978,11 @@ export function markBookingCompleted(id: string, cleanerId: string) {
   }
 }
 
-export function submitBookingRating(id: string, stars: number) {
+export function submitBookingRating(
+  id: string,
+  stars: number,
+  review: string | null = null,
+) {
   const database = getDatabase();
   database.exec("BEGIN IMMEDIATE;");
   try {
@@ -866,17 +1011,18 @@ export function submitBookingRating(id: string, stars: number) {
 
     database
       .prepare(
-        "INSERT INTO ratings (id, booking_id, cleaner_id, stars, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO ratings (id, booking_id, cleaner_id, stars, review, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       )
       .run(
         randomUUID(),
         id,
         booking.cleaner_id,
         stars,
+        review?.trim() || null,
         new Date().toISOString(),
       );
     database.exec("COMMIT;");
-    return { status: "rated" as const, stars };
+    return { status: "rated" as const, stars, review: review?.trim() || null };
   } catch (error) {
     database.exec("ROLLBACK;");
     throw error;
@@ -905,7 +1051,11 @@ export function getCustomerBookings(customerEmail: string) {
         cleaners.name AS cleaner_name,
         bookings.status,
         bookings.subscription_id,
-        ratings.stars AS rating
+        bookings.accepted_by_id,
+        bookings.accepted_by_name,
+        bookings.accepted_at,
+        ratings.stars AS rating,
+        ratings.review AS review
       FROM bookings
       JOIN cleaners ON cleaners.id = bookings.cleaner_id
       LEFT JOIN ratings ON ratings.booking_id = bookings.id
@@ -928,7 +1078,11 @@ export function getCustomerBookings(customerEmail: string) {
       cleaner_name: string;
       status: "scheduled" | "completed";
       subscription_id: string | null;
+      accepted_by_id: string | null;
+      accepted_by_name: string | null;
+      accepted_at: string | null;
       rating: number | null;
+      review: string | null;
     }>;
 
   const today = localDateString();
@@ -936,6 +1090,7 @@ export function getCustomerBookings(customerEmail: string) {
   const all: CustomerBooking[] = rows.map((row) => {
     const isUpcoming = row.status === "scheduled" && row.service_date >= today;
     const statusLabel = row.status === "completed" ? "Completed" : "Scheduled";
+    const isAccepted = Boolean(row.accepted_by_id || row.accepted_by_name);
 
     return {
       id: row.id,
@@ -949,11 +1104,16 @@ export function getCustomerBookings(customerEmail: string) {
       address: row.address,
       createdAt: row.created_at,
       cleanerId: row.cleaner_id,
-      cleanerName: row.cleaner_name,
+      cleanerName: row.accepted_by_name || row.cleaner_name,
+      acceptedById: row.accepted_by_id ?? null,
+      acceptedByName: row.accepted_by_name ?? null,
+      acceptedAt: row.accepted_at ?? null,
+      isAccepted,
       status: row.status,
       statusLabel,
       subscriptionId: row.subscription_id ?? null,
       rating: row.rating ?? null,
+      review: row.review ?? null,
       isUpcoming,
     };
   });
@@ -1275,11 +1435,15 @@ export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
         cleaners.name AS cleaner_name,
         bookings.status,
         bookings.subscription_id,
-        ratings.stars AS rating
+        bookings.accepted_by_id,
+        bookings.accepted_by_name,
+        bookings.accepted_at,
+        ratings.stars AS rating,
+        ratings.review AS review
       FROM bookings
       JOIN cleaners ON cleaners.id = bookings.cleaner_id
       LEFT JOIN ratings ON ratings.booking_id = bookings.id
-      WHERE bookings.cleaner_id = ?
+      WHERE bookings.accepted_by_id = ?
       ORDER BY bookings.service_date ASC, bookings.time_slot ASC`
     )
     .all(cleanerId) as Array<{
@@ -1297,7 +1461,11 @@ export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
       cleaner_name: string;
       status: "scheduled" | "completed";
       subscription_id: string | null;
+      accepted_by_id: string | null;
+      accepted_by_name: string | null;
+      accepted_at: string | null;
       rating: number | null;
+      review: string | null;
     }>;
 
   const today = localDateString();
@@ -1313,13 +1481,187 @@ export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
     address: row.address,
     createdAt: row.created_at,
     cleanerId: row.cleaner_id,
-    cleanerName: row.cleaner_name,
+    cleanerName: row.accepted_by_name || row.cleaner_name,
+    acceptedById: row.accepted_by_id ?? null,
+    acceptedByName: row.accepted_by_name ?? null,
+    acceptedAt: row.accepted_at ?? null,
+    isAccepted: Boolean(row.accepted_by_id || row.accepted_by_name),
     status: row.status,
     statusLabel: row.status === "completed" ? "Completed" : "Scheduled",
     subscriptionId: row.subscription_id ?? null,
     rating: row.rating ?? null,
+    review: row.review ?? null,
     isUpcoming: row.status === "scheduled" && row.service_date >= today,
   }));
+}
+
+export function getAvailableBookingRequests(): CustomerBooking[] {
+  const database = getDatabase();
+  const rows = database
+    .prepare(
+      `SELECT
+        bookings.id,
+        bookings.name,
+        bookings.email,
+        bookings.service_id,
+        bookings.service_name,
+        bookings.price_cents,
+        bookings.service_date,
+        bookings.time_slot,
+        bookings.address,
+        bookings.created_at,
+        bookings.cleaner_id,
+        cleaners.name AS cleaner_name,
+        bookings.status,
+        bookings.subscription_id,
+        bookings.accepted_by_id,
+        bookings.accepted_by_name,
+        bookings.accepted_at,
+        ratings.stars AS rating,
+        ratings.review AS review
+      FROM bookings
+      JOIN cleaners ON cleaners.id = bookings.cleaner_id
+      LEFT JOIN ratings ON ratings.booking_id = bookings.id
+      WHERE bookings.status = 'scheduled'
+        AND (bookings.accepted_by_id IS NULL OR bookings.accepted_by_id = '')
+        AND bookings.service_date >= ?
+      ORDER BY bookings.service_date ASC, bookings.time_slot ASC`
+    )
+    .all(localDateString()) as Array<{
+      id: string;
+      name: string;
+      email: string;
+      service_id: ServiceId;
+      service_name: string;
+      price_cents: number;
+      service_date: string;
+      time_slot: BookingTime;
+      address: string;
+      created_at: string;
+      cleaner_id: string;
+      cleaner_name: string;
+      status: "scheduled" | "completed";
+      subscription_id: string | null;
+      accepted_by_id: string | null;
+      accepted_by_name: string | null;
+      accepted_at: string | null;
+      rating: number | null;
+      review: string | null;
+    }>;
+
+  const today = localDateString();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    serviceId: row.service_id,
+    serviceName: row.service_name,
+    priceCents: row.price_cents,
+    date: row.service_date,
+    time: row.time_slot,
+    address: row.address,
+    createdAt: row.created_at,
+    cleanerId: row.cleaner_id,
+    cleanerName: row.accepted_by_name || row.cleaner_name,
+    acceptedById: row.accepted_by_id ?? null,
+    acceptedByName: row.accepted_by_name ?? null,
+    acceptedAt: row.accepted_at ?? null,
+    isAccepted: false,
+    status: row.status,
+    statusLabel: "Pending Cleaner Acceptance",
+    subscriptionId: row.subscription_id ?? null,
+    rating: row.rating ?? null,
+    review: row.review ?? null,
+    isUpcoming: row.service_date >= today,
+  }));
+}
+
+export function acceptBookingRequest(
+  bookingId: string,
+  cleanerId: string,
+  cleanerName: string,
+): { success: boolean; error?: string } {
+  const database = getDatabase();
+  database.exec("BEGIN IMMEDIATE;");
+  try {
+    const existing = database
+      .prepare(
+        "SELECT id, status, service_date, accepted_by_id FROM bookings WHERE id = ?",
+      )
+      .get(bookingId) as
+      | {
+          id: string;
+          status: string;
+          service_date: string;
+          accepted_by_id: string | null;
+        }
+      | undefined;
+
+    if (!existing) {
+      database.exec("ROLLBACK;");
+      return { success: false, error: "Booking request not found." };
+    }
+
+    if (existing.status === "completed") {
+      database.exec("ROLLBACK;");
+      return { success: false, error: "Cannot accept a completed booking." };
+    }
+
+    if (existing.accepted_by_id) {
+      database.exec("ROLLBACK;");
+      return {
+        success: false,
+        error:
+          existing.accepted_by_id === cleanerId
+            ? "You have already accepted this booking."
+            : "Another cleaner has already accepted this booking.",
+      };
+    }
+
+    // Ensure cleaner exists in cleaners table
+    database
+      .prepare("INSERT OR IGNORE INTO cleaners (id, name) VALUES (?, ?)")
+      .run(cleanerId, cleanerName);
+
+    const weekday = getDayOfWeekFromDateString(existing.service_date);
+    if (!getCleanerAvailableDays(cleanerId).includes(weekday)) {
+      database.exec("ROLLBACK;");
+      return {
+        success: false,
+        error: `You are not available on ${getDayNameFromDateString(existing.service_date)}s. Update your availability to accept this job.`,
+      };
+    }
+
+    database
+      .prepare(
+        `UPDATE bookings
+         SET cleaner_id = ?,
+             accepted_by_id = ?,
+             accepted_by_name = ?,
+             accepted_at = ?
+         WHERE id = ?`,
+      )
+      .run(cleanerId, cleanerId, cleanerName, new Date().toISOString(), bookingId);
+
+    database.exec("COMMIT;");
+    return { success: true };
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+export function getBookingAssignment(
+  bookingId: string,
+): { status: "scheduled" | "completed"; acceptedById: string | null } | null {
+  const row = getDatabase()
+    .prepare("SELECT status, accepted_by_id FROM bookings WHERE id = ?")
+    .get(bookingId) as
+    | { status: "scheduled" | "completed"; accepted_by_id: string | null }
+    | undefined;
+  return row
+    ? { status: row.status, acceptedById: row.accepted_by_id ?? null }
+    : null;
 }
 
 export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: string }> {
@@ -1341,7 +1683,11 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
         cleaners.name AS cleaner_name,
         bookings.status,
         bookings.subscription_id,
-        ratings.stars AS rating
+        bookings.accepted_by_id,
+        bookings.accepted_by_name,
+        bookings.accepted_at,
+        ratings.stars AS rating,
+        ratings.review AS review
       FROM bookings
       JOIN cleaners ON cleaners.id = bookings.cleaner_id
       LEFT JOIN ratings ON ratings.booking_id = bookings.id
@@ -1362,7 +1708,11 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
       cleaner_name: string;
       status: "scheduled" | "completed";
       subscription_id: string | null;
+      accepted_by_id: string | null;
+      accepted_by_name: string | null;
+      accepted_at: string | null;
       rating: number | null;
+      review: string | null;
     }>;
 
   const today = localDateString();
@@ -1379,11 +1729,16 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
     address: row.address,
     createdAt: row.created_at,
     cleanerId: row.cleaner_id,
-    cleanerName: row.cleaner_name,
+    cleanerName: row.accepted_by_name || row.cleaner_name,
+    acceptedById: row.accepted_by_id ?? null,
+    acceptedByName: row.accepted_by_name ?? null,
+    acceptedAt: row.accepted_at ?? null,
+    isAccepted: Boolean(row.accepted_by_id || row.accepted_by_name),
     status: row.status,
     statusLabel: row.status === "completed" ? "Completed" : "Scheduled",
     subscriptionId: row.subscription_id ?? null,
     rating: row.rating ?? null,
+    review: row.review ?? null,
     isUpcoming: row.status === "scheduled" && row.service_date >= today,
   }));
 }
@@ -1420,3 +1775,210 @@ export function getPlatformStats(): {
   };
 }
 
+
+export type AdminCleanerSummary = {
+  userId: string;
+  cleanerId: string;
+  name: string;
+  email: string;
+  status: UserStatus;
+  availableDays: number[];
+  upcomingJobs: number;
+  completedJobs: number;
+  earningsCents: number;
+  averageRating: number | null;
+  reviewCount: number;
+};
+
+export type AdminCustomerSummary = {
+  userId: string | null;
+  name: string;
+  email: string;
+  status: UserStatus | "guest";
+  totalBookings: number;
+  upcomingBookings: number;
+  completedBookings: number;
+  totalSpentCents: number;
+  lastServiceDate: string | null;
+  reviewsWritten: number;
+};
+
+export type AdminReview = {
+  bookingId: string;
+  serviceName: string;
+  serviceDate: string;
+  customerName: string;
+  customerEmail: string;
+  cleanerId: string;
+  cleanerName: string;
+  stars: number;
+  review: string | null;
+  createdAt: string;
+};
+
+export function getAdminCleanerSummaries(): AdminCleanerSummary[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT
+        users.id AS user_id,
+        users.name,
+        users.email,
+        users.status,
+        cleaners.id AS cleaner_id,
+        cleaners.available_days,
+        (SELECT COUNT(*) FROM bookings b
+          WHERE b.accepted_by_id = cleaners.id AND b.status = 'scheduled') AS upcoming_jobs,
+        (SELECT COUNT(*) FROM bookings b
+          WHERE b.accepted_by_id = cleaners.id AND b.status = 'completed') AS completed_jobs,
+        (SELECT COALESCE(SUM(b.price_cents), 0) FROM bookings b
+          WHERE b.accepted_by_id = cleaners.id AND b.status = 'completed') AS earnings_cents,
+        (SELECT AVG(r.stars) FROM ratings r WHERE r.cleaner_id = cleaners.id) AS average_rating,
+        (SELECT COUNT(*) FROM ratings r WHERE r.cleaner_id = cleaners.id) AS review_count
+      FROM users
+      JOIN cleaners ON cleaners.id = users.cleaner_id
+      WHERE users.role = 'cleaner'
+      ORDER BY users.name ASC`,
+    )
+    .all() as Array<{
+    user_id: string;
+    name: string;
+    email: string;
+    status: UserStatus;
+    cleaner_id: string;
+    available_days: string;
+    upcoming_jobs: number;
+    completed_jobs: number;
+    earnings_cents: number;
+    average_rating: number | null;
+    review_count: number;
+  }>;
+
+  return rows.map((row) => ({
+    userId: row.user_id,
+    cleanerId: row.cleaner_id,
+    name: row.name,
+    email: row.email,
+    status: row.status,
+    availableDays: parseWeekdays(row.available_days),
+    upcomingJobs: row.upcoming_jobs,
+    completedJobs: row.completed_jobs,
+    earningsCents: row.earnings_cents,
+    averageRating:
+      row.average_rating === null
+        ? null
+        : Math.round(row.average_rating * 10) / 10,
+    reviewCount: row.review_count,
+  }));
+}
+
+export function getAdminCustomerSummaries(): AdminCustomerSummary[] {
+  const database = getDatabase();
+  const bookingRows = database
+    .prepare(
+      `SELECT
+        LOWER(bookings.email) AS email,
+        MAX(bookings.name) AS name,
+        COUNT(*) AS total_bookings,
+        SUM(CASE WHEN bookings.status = 'scheduled' THEN 1 ELSE 0 END) AS upcoming_bookings,
+        SUM(CASE WHEN bookings.status = 'completed' THEN 1 ELSE 0 END) AS completed_bookings,
+        COALESCE(SUM(bookings.price_cents), 0) AS total_spent_cents,
+        MAX(bookings.service_date) AS last_service_date,
+        COUNT(ratings.id) AS reviews_written
+      FROM bookings
+      LEFT JOIN ratings ON ratings.booking_id = bookings.id
+      GROUP BY LOWER(bookings.email)`,
+    )
+    .all() as Array<{
+    email: string;
+    name: string;
+    total_bookings: number;
+    upcoming_bookings: number;
+    completed_bookings: number;
+    total_spent_cents: number;
+    last_service_date: string | null;
+    reviews_written: number;
+  }>;
+
+  const customerUsers = listUsers().filter((user) => user.role === "customer");
+  const byEmail = new Map(bookingRows.map((row) => [row.email, row]));
+  const summaries: AdminCustomerSummary[] = customerUsers.map((user) => {
+    const row = byEmail.get(user.email.toLowerCase());
+    byEmail.delete(user.email.toLowerCase());
+    return {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      status: user.status,
+      totalBookings: row?.total_bookings ?? 0,
+      upcomingBookings: row?.upcoming_bookings ?? 0,
+      completedBookings: row?.completed_bookings ?? 0,
+      totalSpentCents: row?.total_spent_cents ?? 0,
+      lastServiceDate: row?.last_service_date ?? null,
+      reviewsWritten: row?.reviews_written ?? 0,
+    };
+  });
+
+  // Bookings placed without an account (e.g. before sign-in existed)
+  for (const row of byEmail.values()) {
+    summaries.push({
+      userId: null,
+      name: row.name,
+      email: row.email,
+      status: "guest",
+      totalBookings: row.total_bookings,
+      upcomingBookings: row.upcoming_bookings,
+      completedBookings: row.completed_bookings,
+      totalSpentCents: row.total_spent_cents,
+      lastServiceDate: row.last_service_date,
+      reviewsWritten: row.reviews_written,
+    });
+  }
+
+  return summaries.sort((a, b) => b.totalBookings - a.totalBookings);
+}
+
+export function listReviews(): AdminReview[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT
+        bookings.id AS booking_id,
+        bookings.service_name,
+        bookings.service_date,
+        bookings.name AS customer_name,
+        bookings.email AS customer_email,
+        ratings.cleaner_id,
+        COALESCE(bookings.accepted_by_name, cleaners.name) AS cleaner_name,
+        ratings.stars,
+        ratings.review,
+        ratings.created_at
+      FROM ratings
+      JOIN bookings ON bookings.id = ratings.booking_id
+      JOIN cleaners ON cleaners.id = ratings.cleaner_id
+      ORDER BY ratings.created_at DESC`,
+    )
+    .all() as Array<{
+    booking_id: string;
+    service_name: string;
+    service_date: string;
+    customer_name: string;
+    customer_email: string;
+    cleaner_id: string;
+    cleaner_name: string;
+    stars: number;
+    review: string | null;
+    created_at: string;
+  }>;
+
+  return rows.map((row) => ({
+    bookingId: row.booking_id,
+    serviceName: row.service_name,
+    serviceDate: row.service_date,
+    customerName: row.customer_name,
+    customerEmail: row.customer_email,
+    cleanerId: row.cleaner_id,
+    cleanerName: row.cleaner_name,
+    stars: row.stars,
+    review: row.review,
+    createdAt: row.created_at,
+  }));
+}
