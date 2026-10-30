@@ -315,14 +315,10 @@ function initDatabaseSchema(database: DatabaseSync) {
       expires_at TEXT NOT NULL
     );
 
-    INSERT OR IGNORE INTO cleaners (id, name, available_days)
-    VALUES ('cleaner-002', 'Mia Cleaner', '1,2,3,4,5');
-
+    -- The single admin account. Customers and cleaners sign themselves up
+    -- through /api/auth/register; tests seed demo users via tests/helpers.
     INSERT OR IGNORE INTO users (id, email, password_hash, name, role, cleaner_id, status, created_at)
-    VALUES 
-      ('user-cleaner-002', 'cleaner2@saiping.com', '$2b$10$5Pp0MY.PEkPMrpdc2.QSTOvzZ0vMbZF5P5B1nmjwYnomB7rL3Z1ve', 'Mia Cleaner', 'cleaner', 'cleaner-002', 'active', '2026-01-02T00:00:00.000Z'),
-      ('user-customer-001', 'customer@saiping.com', '$2b$10$ToODN36bWH81uUipsUSRyusZosG/NjJPRN1HJaEuN8hMY.5W8oqvK', 'Alice Customer', 'customer', NULL, 'active', '2026-01-01T00:00:00.000Z'),
-      ('user-cleaner-001', 'cleaner@saiping.com', '$2b$10$L3zIng8mu2OrkBZWfjbtQex/goPsLYva5C3n/XqnMcRD3qt3xH/CO', 'Sai Ping Cleaner', 'cleaner', '${DEFAULT_CLEANER.id}', 'active', '2026-01-01T00:00:00.000Z'),
+    VALUES
       ('user-admin-001', 'admin@saiping.com', '$2b$10$qDP8DUieLBSw2LaudMy.0e4IKK3ssHw21I/VdyuLcsI0425P3zTzm', 'System Administrator', 'admin', NULL, 'active', '2026-01-01T00:00:00.000Z');
   `);
 
@@ -1228,6 +1224,52 @@ export function createUser(input: {
     status,
     createdAt,
   };
+}
+
+export type RegisterAccountResult =
+  | { status: "created"; user: User }
+  | { status: "email-taken" };
+
+/**
+ * Self-registration for customers and cleaners. A cleaner also gets their own
+ * `cleaners` row (working Monday–Friday until they change it). Admin accounts
+ * are never created here: there is exactly one seeded admin.
+ */
+export function registerAccount(input: {
+  email: string;
+  passwordHash: string;
+  name: string;
+  role: "customer" | "cleaner";
+}): RegisterAccountResult {
+  const database = getDatabase();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    if (getUserByEmail(input.email)) {
+      database.exec("ROLLBACK");
+      return { status: "email-taken" };
+    }
+
+    let cleanerId: string | null = null;
+    if (input.role === "cleaner") {
+      cleanerId = `cleaner-${randomUUID()}`;
+      database
+        .prepare("INSERT INTO cleaners (id, name, available_days) VALUES (?, ?, ?)")
+        .run(cleanerId, input.name.trim(), "1,2,3,4,5");
+    }
+
+    const user = createUser({
+      email: input.email,
+      passwordHash: input.passwordHash,
+      name: input.name,
+      role: input.role,
+      cleanerId,
+    });
+    database.exec("COMMIT");
+    return { status: "created", user };
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function getUserByEmail(email: string): StoredUser | null {

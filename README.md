@@ -32,19 +32,21 @@ Sai Ping supports role-based authentication with three roles:
 - **Cleaner**: Access to the cleaner job dashboard (`/dashboard/cleaner`), viewing assigned cleaning jobs, and marking completed cleanings.
 - **Admin**: Access to the administrator control panel (`/dashboard/admin`), viewing platform-wide booking metrics, managing bookings, and toggling user account status (Active / Suspended).
 
-### Seed Development Accounts
+### Accounts
 
-Pre-seeded accounts are initialized automatically in the SQLite database:
+The database seeds **one admin account** only; there is no way to register another admin:
 
 | Role | Email | Password | Assigned Dashboard |
 | --- | --- | --- | --- |
-| **Customer** | `customer@saiping.com` | `CustomerPassword123!` | `/bookings` |
-| **Cleaner** | `cleaner@saiping.com` | `CleanerPassword123!` | `/dashboard/cleaner` (works every day) |
-| **Cleaner** | `cleaner2@saiping.com` | `Cleaner2Password123!` | `/dashboard/cleaner` (works Mon–Fri) |
 | **Admin** | `admin@saiping.com` | `AdminPassword123!` | `/dashboard/admin` |
+
+Customers and cleaners create their own accounts: on the home page click **Login** (or **Book a cleaning** / **Become a cleaner**), pick the **Customer** or **Cleaner** tile and open **Create account**. Passwords need at least 8 characters with a letter and a number. A new cleaner works Monday–Friday until they change it under **My Availability**; until at least one cleaner exists, customers see no bookable days.
+
+To start over with an empty database, stop the dev server and delete `data/bookings.sqlite` (plus any `-wal`/`-shm` files).
 
 ### Authentication Architecture
 
+- **Home page and sign-in pop-up**: `/` is the public Sai Ping site (About, Services, Contact, Bangkok areas). Its Login button opens the same sign-in / sign-up panel used by `/login`, with Customer, Cleaner and Admin tiles. The last email and role are remembered in `localStorage` so returning users don't retype them.
 - **Dedicated Sign-in**: Located at `/login`. Features email and password fields, show/hide password toggle, accessible loading states, and redirect preservation.
 - **Password Security**: Passwords are saved as bcrypt hashes (`cost factor = 10`) with individual salts. Passwords and hashes are never returned in API responses or logs.
 - **Session Persistence**: Sessions are tracked in the SQLite `sessions` table and authenticated via `HttpOnly`, `SameSite=Lax` cookies (`session_token`), with `Secure` flags in production.
@@ -57,6 +59,7 @@ Pre-seeded accounts are initialized automatically in the SQLite database:
 
 | Endpoint | Method | Allowed Roles | Description |
 | --- | --- | --- | --- |
+| `/api/auth/register` | `POST` | Public | Creates a customer or cleaner account (never admin) and signs it in |
 | `/api/auth/login` | `POST` | Public | Authenticates credentials and sets persistent session cookie |
 | `/api/auth/logout` | `POST` | Authenticated | Revokes current session and clears authentication cookies |
 | `/api/auth/session` | `GET` | Public | Returns current session status and authenticated user details |
@@ -90,6 +93,9 @@ npm test
 - **`tests/recurring-cleaning.test.mjs`**: 11 tests covering recurring weekly/biweekly cleanings, conflict detection, and calendar math.
 - **`tests/cleaner-accept.test.mjs`**: 4 tests covering cleaner request acceptance.
 - **`tests/roles-features.test.mjs`**: 7 tests covering cleaner availability, accept conflicts, job ownership, review permissions, and the admin overview.
+- **`tests/register.test.mjs`**: 6 tests covering customer and cleaner sign-up, the admin-registration block, duplicate emails, validation errors, and the admin-only fresh database.
+
+Tests use demo customer/cleaner accounts from `tests/helpers/seed-test-users.mjs` (the app itself seeds only the admin).
 
 ## Recurring cleaning subscriptions
 

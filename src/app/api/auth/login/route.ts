@@ -4,6 +4,7 @@ import {
 } from "../../../../lib/booking-store.ts";
 import {
   isValidEmail,
+  sessionCookieHeaders,
   validateRedirect,
   verifyPassword,
 } from "../../../../lib/auth.ts";
@@ -84,21 +85,7 @@ export async function POST(request: Request) {
   const session = createUserSession(user.id, 7);
   const redirectUrl = validateRedirect(redirectTarget, user.role);
 
-  const isProd = process.env.NODE_ENV === "production";
-  const secureFlag = isProd ? "; Secure" : "";
-  const sessionCookie = `session_token=${encodeURIComponent(session.token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secureFlag}`;
-  const legacyCustomerCookie = `customer_session=${encodeURIComponent(session.token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secureFlag}`;
-
-  const setCookieHeaders =
-    user.role === "customer"
-      ? [sessionCookie, legacyCustomerCookie]
-      : [sessionCookie];
-
-  const headers = new Headers();
-  for (const cookie of setCookieHeaders) {
-    headers.append("Set-Cookie", cookie);
-  }
-  headers.set("Cache-Control", "no-store");
+  const headers = sessionCookieHeaders(session.token, user.role);
 
   return Response.json(
     {

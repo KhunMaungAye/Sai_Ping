@@ -16,6 +16,7 @@ import {
 } from "../src/lib/booking-store.ts";
 import { GET as handleBookingsGET } from "../src/app/api/bookings/route.ts";
 import { GET as handleCustomerBookingsGET } from "../src/app/api/customer/bookings/route.ts";
+import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 
 describe("US-02: View Cleaning Bookings", () => {
   let testDb;
@@ -23,6 +24,7 @@ describe("US-02: View Cleaning Bookings", () => {
   beforeEach(() => {
     testDb = new DatabaseSync(":memory:");
     resetDatabaseForTesting(testDb);
+    seedTestUsers();
     getDatabase(); // initialize schema on testDb
   });
 

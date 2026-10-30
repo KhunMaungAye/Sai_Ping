@@ -686,6 +686,10 @@ export default function CustomerBookingsPage() {
                       </p>
                       {days.length === 0 ? (
                         <p style={{ color: "var(--muted)", fontSize: "13px" }}>Loading available days…</p>
+                      ) : days.every((d) => d.availableSlots.length === 0) ? (
+                        <p className="form-error" role="status" style={{ margin: 0 }}>
+                          No cleaners are available yet — please check back soon once our cleaners have set their working days.
+                        </p>
                       ) : (
                         <div className="date-picker">
                           {days.map((d) => {

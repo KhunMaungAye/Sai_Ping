@@ -13,6 +13,7 @@ import {
 } from "../src/lib/booking-store.ts";
 import { POST as handleAcceptPOST } from "../src/app/api/cleaner/bookings/[id]/accept/route.ts";
 import { GET as handleCleanerBookingsGET } from "../src/app/api/cleaner/bookings/route.ts";
+import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 
 describe("Cleaner Request Acceptance and Separate Pages", () => {
   let testDb;
@@ -20,6 +21,7 @@ describe("Cleaner Request Acceptance and Separate Pages", () => {
   beforeEach(() => {
     testDb = new DatabaseSync(":memory:");
     resetDatabaseForTesting(testDb);
+    seedTestUsers();
     getDatabase(); // initialize schema on testDb
   });
 
