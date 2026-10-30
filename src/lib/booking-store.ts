@@ -45,6 +45,7 @@ export type BookingInput = {
   date: string;
   time: BookingTime;
   address: string;
+  specialInstructions?: string | null;
 };
 
 export type Booking = BookingInput & {
@@ -66,6 +67,7 @@ export type CustomerBooking = {
   date: string;
   time: BookingTime;
   address: string;
+  specialInstructions: string | null;
   createdAt: string;
   cleanerId: string;
   cleanerName: string;
@@ -99,6 +101,7 @@ export type SubscriptionInput = {
   email: string;
   serviceId: ServiceId;
   address: string;
+  specialInstructions?: string | null;
   frequency: Frequency;
   preferredDay?: string;
   startDate: string;
@@ -161,6 +164,7 @@ type StoredBooking = {
   service_date: string;
   time_slot: BookingTime;
   address: string;
+  special_instructions?: string | null;
   created_at: string;
   cleaner_id: string;
   cleaner_name: string;
@@ -214,6 +218,7 @@ function initDatabaseSchema(database: DatabaseSync) {
       service_date TEXT NOT NULL,
       time_slot TEXT NOT NULL,
       address TEXT NOT NULL,
+      special_instructions TEXT,
       created_at TEXT NOT NULL,
       cleaner_id TEXT NOT NULL DEFAULT '${DEFAULT_CLEANER.id}' REFERENCES cleaners(id),
       status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed')),
@@ -249,6 +254,10 @@ function initDatabaseSchema(database: DatabaseSync) {
   }
   if (!bookingColumns.some((column) => column.name === "accepted_at")) {
     database.exec("ALTER TABLE bookings ADD COLUMN accepted_at TEXT;");
+  }
+  // US-13: optional note from the customer for the cleaner (max 250 chars)
+  if (!bookingColumns.some((column) => column.name === "special_instructions")) {
+    database.exec("ALTER TABLE bookings ADD COLUMN special_instructions TEXT;");
   }
 
   const cleanerColumns = database
@@ -542,6 +551,7 @@ function toBooking(row: StoredBooking): Booking {
     date: row.service_date,
     time: row.time_slot,
     address: row.address,
+    specialInstructions: row.special_instructions ?? null,
     createdAt: row.created_at,
     cleanerName: row.cleaner_name,
     subscriptionId: row.subscription_id ?? null,
@@ -610,8 +620,9 @@ export function createBooking(input: BookingInput) {
         `
         INSERT INTO bookings (
           id, name, email, service_id, service_name, price_cents,
-          service_date, time_slot, address, created_at, cleaner_id, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')
+          service_date, time_slot, address, special_instructions, created_at,
+          cleaner_id, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')
       `,
       )
       .run(
@@ -624,6 +635,7 @@ export function createBooking(input: BookingInput) {
         input.date,
         input.time,
         input.address,
+        input.specialInstructions ?? null,
         createdAt,
         cleaner.id,
       );
@@ -633,6 +645,7 @@ export function createBooking(input: BookingInput) {
       status: "created" as const,
       booking: {
         ...input,
+        specialInstructions: input.specialInstructions ?? null,
         id,
         serviceName: service.name,
         priceCents: service.priceCents,
@@ -770,8 +783,9 @@ export function createRecurringSubscription(
     const insertBookingStmt = database.prepare(
       `INSERT INTO bookings (
         id, name, email, service_id, service_name, price_cents,
-        service_date, time_slot, address, created_at, cleaner_id, status, subscription_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)`,
+        service_date, time_slot, address, special_instructions, created_at,
+        cleaner_id, status, subscription_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)`,
     );
 
     for (const date of dates) {
@@ -786,6 +800,7 @@ export function createRecurringSubscription(
         date,
         input.time,
         input.address,
+        input.specialInstructions ?? null,
         createdAt,
         cleaner.id,
         subscriptionId,
@@ -801,6 +816,7 @@ export function createRecurringSubscription(
         date,
         time: input.time,
         address: input.address,
+        specialInstructions: input.specialInstructions ?? null,
         createdAt,
         cleanerName: cleaner.name,
         subscriptionId,
@@ -1042,6 +1058,7 @@ export function getCustomerBookings(customerEmail: string) {
         bookings.service_date,
         bookings.time_slot,
         bookings.address,
+        bookings.special_instructions,
         bookings.created_at,
         bookings.cleaner_id,
         cleaners.name AS cleaner_name,
@@ -1069,6 +1086,7 @@ export function getCustomerBookings(customerEmail: string) {
       service_date: string;
       time_slot: BookingTime;
       address: string;
+      special_instructions: string | null;
       created_at: string;
       cleaner_id: string;
       cleaner_name: string;
@@ -1098,6 +1116,7 @@ export function getCustomerBookings(customerEmail: string) {
       date: row.service_date,
       time: row.time_slot,
       address: row.address,
+      specialInstructions: row.special_instructions ?? null,
       createdAt: row.created_at,
       cleanerId: row.cleaner_id,
       cleanerName: row.accepted_by_name || row.cleaner_name,
@@ -1472,6 +1491,7 @@ export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
         bookings.service_date,
         bookings.time_slot,
         bookings.address,
+        bookings.special_instructions,
         bookings.created_at,
         bookings.cleaner_id,
         cleaners.name AS cleaner_name,
@@ -1498,6 +1518,7 @@ export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
       service_date: string;
       time_slot: BookingTime;
       address: string;
+      special_instructions: string | null;
       created_at: string;
       cleaner_id: string;
       cleaner_name: string;
@@ -1521,6 +1542,7 @@ export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
     date: row.service_date,
     time: row.time_slot,
     address: row.address,
+    specialInstructions: row.special_instructions ?? null,
     createdAt: row.created_at,
     cleanerId: row.cleaner_id,
     cleanerName: row.accepted_by_name || row.cleaner_name,
@@ -1551,6 +1573,7 @@ export function getAvailableBookingRequests(): CustomerBooking[] {
         bookings.service_date,
         bookings.time_slot,
         bookings.address,
+        bookings.special_instructions,
         bookings.created_at,
         bookings.cleaner_id,
         cleaners.name AS cleaner_name,
@@ -1579,6 +1602,7 @@ export function getAvailableBookingRequests(): CustomerBooking[] {
       service_date: string;
       time_slot: BookingTime;
       address: string;
+      special_instructions: string | null;
       created_at: string;
       cleaner_id: string;
       cleaner_name: string;
@@ -1602,6 +1626,7 @@ export function getAvailableBookingRequests(): CustomerBooking[] {
     date: row.service_date,
     time: row.time_slot,
     address: row.address,
+    specialInstructions: row.special_instructions ?? null,
     createdAt: row.created_at,
     cleanerId: row.cleaner_id,
     cleanerName: row.accepted_by_name || row.cleaner_name,
@@ -1720,6 +1745,7 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
         bookings.service_date,
         bookings.time_slot,
         bookings.address,
+        bookings.special_instructions,
         bookings.created_at,
         bookings.cleaner_id,
         cleaners.name AS cleaner_name,
@@ -1745,6 +1771,7 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
       service_date: string;
       time_slot: BookingTime;
       address: string;
+      special_instructions: string | null;
       created_at: string;
       cleaner_id: string;
       cleaner_name: string;
@@ -1769,6 +1796,7 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
     date: row.service_date,
     time: row.time_slot,
     address: row.address,
+    specialInstructions: row.special_instructions ?? null,
     createdAt: row.created_at,
     cleanerId: row.cleaner_id,
     cleanerName: row.accepted_by_name || row.cleaner_name,

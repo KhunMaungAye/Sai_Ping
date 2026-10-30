@@ -407,6 +407,8 @@ export default function CleanerDashboardPage() {
                           <span className="detail-value-text">{req.address}</span>
                         </div>
 
+                        <SpecialInstructions note={req.specialInstructions} />
+
                         <div className="booking-detail-item">
                           <span className="detail-label">Customer Contact</span>
                           <span className="detail-value-text">{req.email}</span>
@@ -500,6 +502,8 @@ export default function CleanerDashboardPage() {
                           <span className="detail-value-text">{job.address}</span>
                         </div>
 
+                        <SpecialInstructions note={job.specialInstructions} />
+
                         <div className="booking-detail-item booking-detail-span-full">
                           <span className="detail-label">Customer Contact</span>
                           <span className="detail-value-text">{job.email}</span>
@@ -579,6 +583,8 @@ export default function CleanerDashboardPage() {
                           <span className="detail-value-text">{job.address}</span>
                         </div>
 
+                        <SpecialInstructions note={job.specialInstructions} />
+
                         <div className="booking-detail-item">
                           <span className="detail-label">Customer Contact</span>
                           <span className="detail-value-text">{job.email}</span>
@@ -656,5 +662,19 @@ export default function CleanerDashboardPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+/** US-13: the customer's handling notes, or a clear message when there are none. */
+function SpecialInstructions({ note }: { note: string | null | undefined }) {
+  return (
+    <div className="booking-detail-item booking-detail-span-full">
+      <span className="detail-label">Special Instructions</span>
+      {note ? (
+        <p className="special-instructions-note">{note}</p>
+      ) : (
+        <p className="special-instructions-note is-empty">No special instructions provided.</p>
+      )}
+    </div>
   );
 }

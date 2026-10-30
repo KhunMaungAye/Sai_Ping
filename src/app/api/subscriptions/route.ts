@@ -12,6 +12,7 @@ import {
   type Frequency,
   type SubscriptionInput,
 } from "../../../lib/booking-store.ts";
+import { parseSpecialInstructions } from "../../../lib/services.ts";
 
 function text(value: unknown, limit: number) {
   return typeof value === "string" ? value.trim().slice(0, limit) : "";
@@ -120,6 +121,7 @@ export async function POST(request: Request) {
   const frequency = body.frequency as Frequency;
   const preferredDay = body.preferredDay ? text(body.preferredDay, 20) : undefined;
   const time = body.time as BookingTime;
+  const instructions = parseSpecialInstructions(body.specialInstructions);
   const occurrences =
     typeof body.occurrences === "number" && body.occurrences > 0
       ? body.occurrences
@@ -139,6 +141,13 @@ export async function POST(request: Request) {
   ) {
     return Response.json(
       { error: "Add your name, a valid email, and a full service address." },
+      { status: 400 },
+    );
+  }
+
+  if (!instructions.ok) {
+    return Response.json(
+      { error: instructions.error, code: "INSTRUCTIONS_TOO_LONG" },
       { status: 400 },
     );
   }
@@ -241,6 +250,7 @@ export async function POST(request: Request) {
     name,
     email,
     address,
+    specialInstructions: instructions.value,
     serviceId,
     frequency,
     preferredDay,

@@ -2699,3 +2699,42 @@ html {
     height: 38px;
   }
 }
+
+/* US-13: special cleaning instructions */
+.special-instructions-input {
+  width: 100%;
+  min-height: 88px;
+  padding-top: 10px;
+  resize: vertical;
+}
+.char-counter {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+.char-counter.is-at-limit {
+  color: var(--coral);
+  font-weight: 700;
+}
+.special-instructions-note {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-left: 4px solid var(--sunny);
+  border-radius: 8px;
+  background: #fff8e1;
+  color: var(--ink);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.special-instructions-note.is-empty {
+  border-left-color: var(--line);
+  background: var(--sky);
+  color: var(--muted);
+  font-style: italic;
+}
+.special-instructions-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

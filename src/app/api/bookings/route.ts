@@ -13,6 +13,7 @@ import {
   type Frequency,
   type SubscriptionInput,
 } from "../../../lib/booking-store.ts";
+import { parseSpecialInstructions } from "../../../lib/services.ts";
 import { getAuthenticatedUser } from "../../../lib/auth.ts";
 
 function text(value: unknown, limit: number) {
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
   const serviceId = body.serviceId;
   const time = body.time as BookingTime;
   const frequency = body.frequency as Frequency | undefined;
+  const instructions = parseSpecialInstructions(body.specialInstructions);
 
   if (
     name.length < 2 ||
@@ -106,6 +108,14 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  if (!instructions.ok) {
+    return Response.json(
+      { error: instructions.error, code: "INSTRUCTIONS_TOO_LONG" },
+      { status: 400 },
+    );
+  }
+  const specialInstructions = instructions.value;
 
   // Handle recurring subscription when frequency is specified
   if (frequency) {
@@ -205,6 +215,7 @@ export async function POST(request: Request) {
       name,
       email,
       address,
+      specialInstructions,
       serviceId,
       frequency,
       preferredDay,
@@ -259,7 +270,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const input: BookingInput = { name, email, address, date, serviceId, time };
+  const input: BookingInput = {
+    name,
+    email,
+    address,
+    specialInstructions,
+    date,
+    serviceId,
+    time,
+  };
 
   try {
     const result = createBooking(input);

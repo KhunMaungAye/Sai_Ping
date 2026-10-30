@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import type { AvailableDay, CustomerBooking } from "@/lib/booking-store";
 import {
   SERVICES,
+  SPECIAL_INSTRUCTIONS_MAX_LENGTH,
   TIME_SLOTS,
+  parseSpecialInstructions,
   type BookingTime,
   type ServiceId,
 } from "@/lib/services";
@@ -75,6 +77,7 @@ export default function CustomerBookingsPage() {
   const [availability, setAvailability] = useState<"loading" | "ready" | "error">("loading");
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [specialInstructions, setSpecialInstructions] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingFormError, setBookingFormError] = useState("");
   const [days, setDays] = useState<AvailableDay[]>([]);
@@ -287,6 +290,12 @@ export default function CustomerBookingsPage() {
       return;
     }
 
+    const instructions = parseSpecialInstructions(specialInstructions);
+    if (!instructions.ok) {
+      setBookingFormError(instructions.error);
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -298,6 +307,7 @@ export default function CustomerBookingsPage() {
             name: name.trim() || customerName || customerEmail.split("@")[0],
             email: customerEmail,
             address: address.trim(),
+            specialInstructions: instructions.value,
             serviceId,
             date,
             time,
@@ -324,6 +334,7 @@ export default function CustomerBookingsPage() {
             name: name.trim() || customerName || customerEmail.split("@")[0],
             email: customerEmail,
             address: address.trim(),
+            specialInstructions: instructions.value,
             serviceId,
             frequency: scheduleMode,
             preferredDay,
@@ -347,6 +358,7 @@ export default function CustomerBookingsPage() {
         );
       }
 
+      setSpecialInstructions("");
       setRefresh((v) => v + 1);
       setActiveTab("upcoming");
     } catch (err) {
@@ -778,6 +790,33 @@ export default function CustomerBookingsPage() {
                       />
                     </div>
 
+                    {/* Step 6: Special instructions (US-13) */}
+                    <div style={{ marginBottom: "24px" }}>
+                      <label className="field-label" htmlFor="booking-instructions" style={{ fontWeight: 600, marginBottom: "4px", display: "block" }}>
+                        6. Special Instructions <span style={{ fontWeight: 400, color: "var(--muted)" }}>(optional)</span>
+                      </label>
+                      <p id="booking-instructions-hint" style={{ margin: "0 0 8px", color: "var(--muted)", fontSize: "13px" }}>
+                        Anything your cleaner should know: pets, parking, door codes, rooms to skip or delicate surfaces.
+                      </p>
+                      <textarea
+                        id="booking-instructions"
+                        className="text-input special-instructions-input"
+                        rows={3}
+                        maxLength={SPECIAL_INSTRUCTIONS_MAX_LENGTH}
+                        placeholder="e.g. Please use the side gate. Our cat hides under the bed, so keep the bedroom door closed."
+                        value={specialInstructions}
+                        onChange={(e) => setSpecialInstructions(e.target.value)}
+                        aria-describedby="booking-instructions-hint booking-instructions-count"
+                      />
+                      <div
+                        id="booking-instructions-count"
+                        className={`char-counter${specialInstructions.length >= SPECIAL_INSTRUCTIONS_MAX_LENGTH ? " is-at-limit" : ""}`}
+                        aria-live="polite"
+                      >
+                        {specialInstructions.length}/{SPECIAL_INSTRUCTIONS_MAX_LENGTH} characters
+                      </div>
+                    </div>
+
                     {/* Summary & Submit */}
                     <div style={{ padding: "16px", background: "#f8faf8", borderRadius: "8px", marginBottom: "20px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -888,6 +927,13 @@ function BookingCard({
           <span className="detail-label">Service Address</span>
           <span className="detail-value-text">{booking.address}</span>
         </div>
+
+        {booking.specialInstructions ? (
+          <div className="booking-detail-item booking-detail-span-full">
+            <span className="detail-label">Your Notes for the Cleaner</span>
+            <span className="detail-value-text special-instructions-text">{booking.specialInstructions}</span>
+          </div>
+        ) : null}
       </div>
 
       <div className="booking-card-footer">
