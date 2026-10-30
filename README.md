@@ -39,7 +39,8 @@ Pre-seeded accounts are initialized automatically in the SQLite database:
 | Role | Email | Password | Assigned Dashboard |
 | --- | --- | --- | --- |
 | **Customer** | `customer@saiping.com` | `CustomerPassword123!` | `/bookings` |
-| **Cleaner** | `cleaner@saiping.com` | `CleanerPassword123!` | `/dashboard/cleaner` |
+| **Cleaner** | `cleaner@saiping.com` | `CleanerPassword123!` | `/dashboard/cleaner` (works every day) |
+| **Cleaner** | `cleaner2@saiping.com` | `Cleaner2Password123!` | `/dashboard/cleaner` (works Mon–Fri) |
 | **Admin** | `admin@saiping.com` | `AdminPassword123!` | `/dashboard/admin` |
 
 ### Authentication Architecture
@@ -65,6 +66,17 @@ Pre-seeded accounts are initialized automatically in the SQLite database:
 | `/api/admin/bookings` | `GET` | Admin | Returns system-wide booking statistics and reservation history |
 | `/api/admin/users` | `GET` | Admin | Returns list of all registered platform user accounts |
 | `/api/admin/users/[id]/status` | `POST` | Admin | Updates user account status (`active` / `suspended`) |
+| `/api/admin/overview` | `GET` | Admin | Per-cleaner and per-customer summaries plus all ratings and reviews |
+| `/api/cleaner/bookings/[id]/accept` | `POST` | Cleaner | Accepts an open request on one of the cleaner's working days |
+| `/api/cleaner/availability` | `GET`, `PUT` | Cleaner | Reads or sets the cleaner's working weekdays (`0` = Sunday … `6` = Saturday) |
+| `/api/availability/days` | `GET` | Public | Upcoming dates with their open arrival windows |
+| `/api/bookings/[id]/rating` | `GET`, `POST` | Customer who booked | Reads or submits a 1–5 star rating with an optional written review |
+
+### Role dashboards
+
+- **Customer** (`/bookings`): books a cleaning by picking from upcoming days that have an open arrival window (a day is bookable only when at least one active cleaner works that weekday), tracks requests, and rates and reviews the cleaner once a job is completed.
+- **Cleaner** (`/dashboard/cleaner`): sets working days, accepts open requests (first cleaner to accept gets the job), and marks their own accepted jobs completed. Reviews they receive appear on completed jobs.
+- **Admin** (`/dashboard/admin`): sees every booking, each cleaner's availability, jobs, earnings and average rating, each customer's bookings and spend, all reviews, and can suspend or reactivate accounts.
 
 ### Automated Test Suites
 
@@ -76,6 +88,8 @@ npm test
 - **`tests/auth.test.mjs`**: 19 tests covering login validation, bcrypt comparison, session creation, session invalidation on logout, RBAC guards, account suspension, and open redirect defense.
 - **`tests/customer-bookings.test.mjs`**: 8 tests covering customer booking retrieval, server-side data isolation, and query-parameter tampering prevention.
 - **`tests/recurring-cleaning.test.mjs`**: 11 tests covering recurring weekly/biweekly cleanings, conflict detection, and calendar math.
+- **`tests/cleaner-accept.test.mjs`**: 4 tests covering cleaner request acceptance.
+- **`tests/roles-features.test.mjs`**: 7 tests covering cleaner availability, accept conflicts, job ownership, review permissions, and the admin overview.
 
 ## Recurring cleaning subscriptions
 

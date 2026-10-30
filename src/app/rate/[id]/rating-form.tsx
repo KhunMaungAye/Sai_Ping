@@ -11,6 +11,7 @@ type BookingDetails = {
   cleanerId: string;
   cleanerName: string;
   rating: number | null;
+  review: string | null;
 };
 
 function formatDate(value: string) {
@@ -24,6 +25,7 @@ function formatDate(value: string) {
 export default function RatingForm({ bookingId }: { bookingId: string }) {
   const [booking, setBooking] = useState<BookingDetails | null>(null);
   const [stars, setStars] = useState(0);
+  const [review, setReview] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -47,6 +49,7 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
         setBooking(result.booking);
         if (result.booking.rating !== null) {
           setStars(result.booking.rating);
+          setReview(result.booking.review ?? "");
           setIsRated(true);
         }
       })
@@ -72,7 +75,7 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ stars }),
+          body: JSON.stringify({ stars, review: review.trim() || null }),
         },
       );
       const result = (await response.json()) as {
@@ -112,8 +115,8 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
           <p className="form-error" role="alert">
             {error}
           </p>
-          <Link className="text-link" href="/">
-            Return to booking
+          <Link className="text-link" href="/bookings">
+            Return to my bookings
           </Link>
         </div>
       ) : null}
@@ -168,6 +171,7 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
               <p>
                 Your {stars}-star rating is saved with this completed service.
               </p>
+              {review ? <p className="submitted-review">“{review}”</p> : null}
             </div>
           ) : (
             <div className="rating-entry">
@@ -196,6 +200,17 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
               <p className="rating-scale">
                 {stars ? `${stars} out of 5 stars` : "Select a rating"}
               </p>
+              <label className="field-label" htmlFor="rating-review">
+                Write a review (optional)
+              </label>
+              <textarea
+                id="rating-review"
+                className="review-textarea"
+                maxLength={1000}
+                placeholder="What went well? Anything the cleaner could improve?"
+                value={review}
+                onChange={(e) => setReview(e.target.value)}
+              />
               {error ? (
                 <p className="form-error" role="alert">
                   {error}
