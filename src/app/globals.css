@@ -2451,6 +2451,7 @@ html {
   z-index: 100;
   display: grid;
   place-items: center;
+  grid-template-columns: minmax(0, 1fr);
   padding: 16px;
   background: rgba(6, 14, 48, 0.62);
   backdrop-filter: blur(3px);
@@ -2460,6 +2461,7 @@ html {
 .auth-modal {
   position: relative;
   width: min(460px, 100%);
+  min-width: 0;
   padding: 32px 28px 28px;
   border-radius: 22px;
   background: white;
@@ -2502,10 +2504,11 @@ html {
 }
 .role-tiles {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 .role-tile {
+  min-width: 0;
   display: grid;
   justify-items: center;
   gap: 6px;
@@ -2690,9 +2693,18 @@ html {
   }
 }
 @media (max-width: 420px) {
+  .auth-modal-backdrop {
+    padding: 10px;
+  }
   .auth-modal,
   .auth-card {
-    padding: 28px 18px 20px;
+    padding: 28px 16px 20px;
+  }
+  .role-tiles {
+    gap: 6px;
+  }
+  .role-tile-label {
+    font-size: 12px;
   }
   .role-tile-icon {
     width: 38px;
