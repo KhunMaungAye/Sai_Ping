@@ -1,6 +1,6 @@
 # Sai Ping
 
-Sai Ping is a home-cleaning booking website for Bangkok, built by our Agile Software Development group. Customers book a cleaning on a day a cleaner is working, cleaners accept the jobs, and customers rate and review the cleaner afterwards. One admin oversees everything.
+Sai Ping is a home-cleaning booking website, built by our Agile Software Development group. Customers book a cleaning on a day a cleaner is working, cleaners accept the jobs, and customers rate and review the cleaner afterwards. One admin oversees everything.
 
 Built with Next.js 16 (App Router), React 19, TypeScript and SQLite (`node:sqlite`).
 
