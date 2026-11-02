@@ -337,6 +337,32 @@ function initDatabaseSchema(database: DatabaseSync) {
   if (!ratingColumns.some((column) => column.name === "review")) {
     database.exec("ALTER TABLE ratings ADD COLUMN review TEXT;");
   }
+
+  // US-15: pausing and skipping recurring cleanings
+  const subscriptionColumns = database
+    .prepare("PRAGMA table_info(subscriptions)")
+    .all() as { name: string }[];
+  if (!subscriptionColumns.some((column) => column.name === "paused_until")) {
+    database.exec("ALTER TABLE subscriptions ADD COLUMN paused_until TEXT;");
+  }
+  if (!subscriptionColumns.some((column) => column.name === "paused_at")) {
+    database.exec("ALTER TABLE subscriptions ADD COLUMN paused_at TEXT;");
+  }
+  // One row per visit a customer skipped or paused. The visit's booking is
+  // removed (so it is never charged and its slot is freed); this row keeps the
+  // record, stops the same date being skipped twice, and lets "resume" put
+  // paused visits back.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS subscription_skips (
+      id TEXT PRIMARY KEY,
+      subscription_id TEXT NOT NULL REFERENCES subscriptions(id),
+      service_date TEXT NOT NULL,
+      time_slot TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK (reason IN ('skip', 'pause')),
+      created_at TEXT NOT NULL,
+      UNIQUE (subscription_id, service_date)
+    );
+  `);
 }
 
 export function getDatabase(customPath?: string) {
@@ -2051,4 +2077,391 @@ export function listReviews(): AdminReview[] {
     review: row.review,
     createdAt: row.created_at,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// US-15: pause and skip recurring cleanings
+// ---------------------------------------------------------------------------
+
+/** Longest pause a customer can set, in days from today. */
+export const MAX_PAUSE_DAYS = 365;
+
+export type SubscriptionPlanStatus = "active" | "paused" | "cancelled";
+
+export type CustomerSubscription = {
+  id: string;
+  serviceName: string;
+  frequency: Frequency;
+  preferredDay: string;
+  time: BookingTime;
+  priceCents: number;
+  address: string;
+  status: SubscriptionPlanStatus;
+  pausedUntil: string | null;
+  /** The next visit that can still be skipped (after today, not completed). */
+  nextVisit: { bookingId: string; date: string; isAccepted: boolean } | null;
+  upcomingVisits: string[];
+  lastVisitDate: string | null;
+  skippedVisits: Array<{ date: string; reason: "skip" | "pause" }>;
+};
+
+type SubscriptionRowWithPause = StoredSubscription & {
+  paused_until: string | null;
+};
+
+type SubscriptionVisitRow = {
+  id: string;
+  service_date: string;
+  status: "scheduled" | "completed";
+  accepted_by_id: string | null;
+};
+
+function planStatus(row: SubscriptionRowWithPause, today: string): SubscriptionPlanStatus {
+  if (row.status === "cancelled") return "cancelled";
+  if (row.paused_until && row.paused_until > today) return "paused";
+  return "active";
+}
+
+function findOwnedSubscription(id: string, customerEmail: string) {
+  const row = getDatabase()
+    .prepare("SELECT * FROM subscriptions WHERE id = ?")
+    .get(id) as SubscriptionRowWithPause | undefined;
+  // Someone else's plan is reported as "not found" so ids can't be probed.
+  if (!row || row.email.toLowerCase() !== customerEmail.trim().toLowerCase()) {
+    return null;
+  }
+  return row;
+}
+
+function toCustomerSubscription(
+  row: SubscriptionRowWithPause,
+  today: string,
+): CustomerSubscription {
+  const database = getDatabase();
+  const visits = database
+    .prepare(
+      `SELECT id, service_date, status, accepted_by_id FROM bookings
+       WHERE subscription_id = ? ORDER BY service_date ASC`,
+    )
+    .all(row.id) as SubscriptionVisitRow[];
+  const skips = database
+    .prepare(
+      `SELECT service_date, reason FROM subscription_skips
+       WHERE subscription_id = ? AND service_date > ? ORDER BY service_date ASC`,
+    )
+    .all(row.id, today) as Array<{ service_date: string; reason: "skip" | "pause" }>;
+
+  const upcoming = visits.filter(
+    (visit) => visit.status === "scheduled" && visit.service_date > today,
+  );
+  const next = upcoming[0];
+
+  return {
+    id: row.id,
+    serviceName: row.service_name,
+    frequency: row.frequency,
+    preferredDay: row.preferred_day,
+    time: row.time_slot,
+    priceCents: row.price_cents,
+    address: row.address,
+    status: planStatus(row, today),
+    pausedUntil: row.paused_until && row.paused_until > today ? row.paused_until : null,
+    nextVisit: next
+      ? { bookingId: next.id, date: next.service_date, isAccepted: Boolean(next.accepted_by_id) }
+      : null,
+    upcomingVisits: upcoming.map((visit) => visit.service_date),
+    lastVisitDate: visits.length ? visits[visits.length - 1].service_date : null,
+    skippedVisits: skips.map((skip) => ({ date: skip.service_date, reason: skip.reason })),
+  };
+}
+
+/** A customer's recurring plans, newest first. */
+export function listCustomerSubscriptions(customerEmail: string): CustomerSubscription[] {
+  const today = localDateString();
+  const rows = getDatabase()
+    .prepare(
+      `SELECT * FROM subscriptions WHERE LOWER(email) = ? ORDER BY created_at DESC`,
+    )
+    .all(customerEmail.trim().toLowerCase()) as SubscriptionRowWithPause[];
+  return rows.map((row) => toCustomerSubscription(row, today));
+}
+
+export type SubscriptionChangeResult =
+  | { status: "ok"; subscription: CustomerSubscription; message: string; dates: string[] }
+  | { status: "not-found" | "invalid" | "conflict"; error: string };
+
+function withTransaction<T>(work: () => T): T {
+  const database = getDatabase();
+  database.exec("BEGIN IMMEDIATE;");
+  try {
+    const result = work();
+    database.exec("COMMIT;");
+    return result;
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+function recordSkip(
+  subscriptionId: string,
+  date: string,
+  time: BookingTime,
+  reason: "skip" | "pause",
+) {
+  getDatabase()
+    .prepare(
+      `INSERT INTO subscription_skips (id, subscription_id, service_date, time_slot, reason, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(randomUUID(), subscriptionId, date, time, reason, new Date().toISOString());
+}
+
+/**
+ * Skips one upcoming visit without cancelling the plan. The client sends the
+ * date it showed as "next", so a double-click never skips two visits.
+ * Billing rule: a skipped visit's booking is removed, so it is never charged.
+ * Visits today or earlier, and completed visits, cannot be skipped.
+ */
+export function skipSubscriptionVisit(
+  subscriptionId: string,
+  customerEmail: string,
+  date: string,
+): SubscriptionChangeResult {
+  const today = localDateString();
+  return withTransaction(() => {
+    const database = getDatabase();
+    const sub = findOwnedSubscription(subscriptionId, customerEmail);
+    if (!sub) return { status: "not-found", error: "Recurring plan not found." };
+    if (sub.status === "cancelled") {
+      return { status: "conflict", error: "This plan has been cancelled." };
+    }
+    if (!isBookableDate(date) || date <= today) {
+      return {
+        status: "invalid",
+        error: "Only visits after today can be skipped.",
+      };
+    }
+
+    const alreadySkipped = database
+      .prepare(
+        "SELECT reason FROM subscription_skips WHERE subscription_id = ? AND service_date = ?",
+      )
+      .get(sub.id, date) as { reason: "skip" | "pause" } | undefined;
+    if (alreadySkipped) {
+      return {
+        status: "ok",
+        subscription: toCustomerSubscription(sub, today),
+        message: `Your ${displayDayAndDate(date)} visit was already skipped.`,
+        dates: [],
+      };
+    }
+
+    const visit = database
+      .prepare(
+        `SELECT id, service_date, status, accepted_by_id FROM bookings
+         WHERE subscription_id = ? AND service_date = ?`,
+      )
+      .get(sub.id, date) as SubscriptionVisitRow | undefined;
+    if (!visit) {
+      return { status: "invalid", error: "There is no visit on that date to skip." };
+    }
+    if (visit.status === "completed") {
+      return { status: "conflict", error: "That visit has already been completed." };
+    }
+
+    database.prepare("DELETE FROM bookings WHERE id = ?").run(visit.id);
+    recordSkip(sub.id, date, sub.time_slot, "skip");
+
+    const updated = toCustomerSubscription(sub, today);
+    const nextText = updated.nextVisit
+      ? ` Your next cleaning is ${displayDayAndDate(updated.nextVisit.date)}.`
+      : " There are no more visits left on this plan.";
+    return {
+      status: "ok",
+      subscription: updated,
+      message: `Skipped your ${displayDayAndDate(date)} visit. You won't be charged for it.${nextText}`,
+      dates: [date],
+    };
+  });
+}
+
+/**
+ * Pauses a plan until `resumeDate`: every not-yet-completed visit after today
+ * and before the resume date is removed (not charged). Visits on or after the
+ * resume date stay booked, so the plan restarts by itself.
+ */
+export function pauseSubscription(
+  subscriptionId: string,
+  customerEmail: string,
+  resumeDate: string,
+): SubscriptionChangeResult {
+  const today = localDateString();
+  return withTransaction(() => {
+    const database = getDatabase();
+    const sub = findOwnedSubscription(subscriptionId, customerEmail);
+    if (!sub) return { status: "not-found", error: "Recurring plan not found." };
+    if (sub.status === "cancelled") {
+      return { status: "conflict", error: "This plan has been cancelled." };
+    }
+    if (planStatus(sub, today) === "paused") {
+      return {
+        status: "conflict",
+        error: `This plan is already paused until ${displayDayAndDate(sub.paused_until!)}. Resume it first to pick a new date.`,
+      };
+    }
+    if (!isBookableDate(resumeDate) || resumeDate <= today) {
+      return { status: "invalid", error: "Choose a resume date after today." };
+    }
+    if (resumeDate > addDaysToDateString(today, MAX_PAUSE_DAYS)) {
+      return {
+        status: "invalid",
+        error: `You can pause for up to ${MAX_PAUSE_DAYS} days.`,
+      };
+    }
+
+    const visits = database
+      .prepare(
+        `SELECT id, service_date, status, accepted_by_id FROM bookings
+         WHERE subscription_id = ? AND status = 'scheduled'
+           AND service_date > ? ORDER BY service_date ASC`,
+      )
+      .all(sub.id, today) as SubscriptionVisitRow[];
+    const lastVisit = visits[visits.length - 1]?.service_date;
+    if (!lastVisit) {
+      return { status: "conflict", error: "There are no upcoming visits to pause." };
+    }
+    if (resumeDate > lastVisit) {
+      return {
+        status: "invalid",
+        error: `Choose a resume date on or before your last scheduled visit (${displayDayAndDate(lastVisit)}).`,
+      };
+    }
+
+    const paused = visits.filter((visit) => visit.service_date < resumeDate);
+    for (const visit of paused) {
+      database.prepare("DELETE FROM bookings WHERE id = ?").run(visit.id);
+      recordSkip(sub.id, visit.service_date, sub.time_slot, "pause");
+    }
+    database
+      .prepare("UPDATE subscriptions SET paused_until = ?, paused_at = ? WHERE id = ?")
+      .run(resumeDate, new Date().toISOString(), sub.id);
+
+    const updated = toCustomerSubscription(
+      { ...sub, paused_until: resumeDate },
+      today,
+    );
+    const count = paused.length;
+    return {
+      status: "ok",
+      subscription: updated,
+      message:
+        `Your plan is paused until ${displayDayAndDate(resumeDate)}. ` +
+        (count
+          ? `${count} visit${count === 1 ? "" : "s"} won't happen and won't be charged.`
+          : "No visits fall in that period."),
+      dates: paused.map((visit) => visit.service_date),
+    };
+  });
+}
+
+/**
+ * Ends a pause early. Paused visits that are still in the future are booked
+ * again when their time slot is free and a cleaner works that day; any that
+ * can't be restored are listed so the customer knows.
+ */
+export function resumeSubscription(
+  subscriptionId: string,
+  customerEmail: string,
+): SubscriptionChangeResult {
+  const today = localDateString();
+  return withTransaction(() => {
+    const database = getDatabase();
+    const sub = findOwnedSubscription(subscriptionId, customerEmail);
+    if (!sub) return { status: "not-found", error: "Recurring plan not found." };
+    if (planStatus(sub, today) !== "paused") {
+      return { status: "conflict", error: "This plan isn't paused." };
+    }
+
+    const pausedVisits = database
+      .prepare(
+        `SELECT id, service_date FROM subscription_skips
+         WHERE subscription_id = ? AND reason = 'pause' AND service_date > ?
+         ORDER BY service_date ASC`,
+      )
+      .all(sub.id, today) as Array<{ id: string; service_date: string }>;
+
+    const restored: string[] = [];
+    const unavailable: string[] = [];
+    const servicedDays = getServicedWeekdays();
+    // US-13: every visit of a plan carries the same note; copy it onto the
+    // visits we put back (pausing guarantees at least one visit remains).
+    const note = (
+      database
+        .prepare(
+          `SELECT special_instructions FROM bookings
+           WHERE subscription_id = ? AND special_instructions IS NOT NULL LIMIT 1`,
+        )
+        .get(sub.id) as { special_instructions: string } | undefined
+    )?.special_instructions ?? null;
+    for (const skip of pausedVisits) {
+      const taken = database
+        .prepare("SELECT id FROM bookings WHERE service_date = ? AND time_slot = ?")
+        .get(skip.service_date, sub.time_slot);
+      if (taken || !servicedDays.has(getDayOfWeekFromDateString(skip.service_date))) {
+        unavailable.push(skip.service_date);
+        continue;
+      }
+      database
+        .prepare(
+          `INSERT INTO bookings (
+            id, name, email, service_id, service_name, price_cents,
+            service_date, time_slot, address, special_instructions, created_at,
+            cleaner_id, status, subscription_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)`,
+        )
+        .run(
+          randomUUID(),
+          sub.name,
+          sub.email,
+          sub.service_id,
+          sub.service_name,
+          sub.price_cents,
+          skip.service_date,
+          sub.time_slot,
+          sub.address,
+          note,
+          new Date().toISOString(),
+          sub.cleaner_id,
+          sub.id,
+        );
+      database.prepare("DELETE FROM subscription_skips WHERE id = ?").run(skip.id);
+      restored.push(skip.service_date);
+    }
+
+    database
+      .prepare("UPDATE subscriptions SET paused_until = NULL, paused_at = NULL WHERE id = ?")
+      .run(sub.id);
+
+    const updated = toCustomerSubscription({ ...sub, paused_until: null }, today);
+    let message = "Your plan is active again.";
+    if (restored.length) {
+      message += ` ${restored.length} paused visit${restored.length === 1 ? " is" : "s are"} back on your schedule.`;
+    }
+    if (unavailable.length) {
+      message += ` ${unavailable.map(displayDayAndDate).join(", ")} could not be restored because that time is no longer available.`;
+    }
+    return { status: "ok", subscription: updated, message, dates: restored };
+  });
+}
+
+function displayDayAndDate(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const label = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+  return `${getDayNameFromDateString(date)}, ${label}`;
 }

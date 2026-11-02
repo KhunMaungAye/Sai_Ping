@@ -16,6 +16,7 @@ import {
   getDayNameFromDateString,
   getNextServiceDate,
 } from "@/lib/date-utils";
+import { RecurringPlans } from "../components/recurring-plans";
 
 function dateString(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
@@ -47,7 +48,7 @@ function displayPrice(cents: number) {
   }).format(cents / 100);
 }
 
-type TabType = "upcoming" | "previous" | "all" | "book-new";
+type TabType = "upcoming" | "previous" | "all" | "plans" | "book-new";
 type ScheduleMode = "one-time" | "weekly" | "biweekly";
 
 export default function CustomerBookingsPage() {
@@ -507,6 +508,17 @@ export default function CustomerBookingsPage() {
               <button
                 type="button"
                 role="tab"
+                id="tab-plans"
+                aria-selected={activeTab === "plans"}
+                className={`dashboard-tab${activeTab === "plans" ? " is-active" : ""}`}
+                onClick={() => setActiveTab("plans")}
+              >
+                <span>Recurring Plans</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
                 id="tab-book-new"
                 aria-selected={activeTab === "book-new"}
                 className={`dashboard-tab${activeTab === "book-new" ? " is-active" : ""}`}
@@ -516,6 +528,13 @@ export default function CustomerBookingsPage() {
                 <span>+ Book a Cleaning</span>
               </button>
             </nav>
+
+            {/* Tab Panel: Recurring plans (US-15 skip / pause) */}
+            {activeTab === "plans" ? (
+              <section id="panel-plans" role="tabpanel" className="tab-panel">
+                <RecurringPlans onChanged={() => setRefresh((v) => v + 1)} />
+              </section>
+            ) : null}
 
             {/* Tab Panel: Upcoming */}
             {activeTab === "upcoming" ? (
