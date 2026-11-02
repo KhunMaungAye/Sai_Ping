@@ -2188,7 +2188,10 @@ export function listCustomerSubscriptions(customerEmail: string): CustomerSubscr
 
 export type SubscriptionChangeResult =
   | { status: "ok"; subscription: CustomerSubscription; message: string; dates: string[] }
-  | { status: "not-found" | "invalid" | "conflict"; error: string };
+  | { status: "not-found" | "invalid" | "conflict"; error: string }
+  // A cleaner has already accepted some of the visits that would be removed;
+  // the customer must confirm before the cleaner loses those jobs.
+  | { status: "needs-confirmation"; error: string; dates: string[] };
 
 function withTransaction<T>(work: () => T): T {
   const database = getDatabase();
@@ -2227,6 +2230,7 @@ export function skipSubscriptionVisit(
   subscriptionId: string,
   customerEmail: string,
   date: string,
+  confirmAccepted = false,
 ): SubscriptionChangeResult {
   const today = localDateString();
   return withTransaction(() => {
@@ -2269,6 +2273,13 @@ export function skipSubscriptionVisit(
     if (visit.status === "completed") {
       return { status: "conflict", error: "That visit has already been completed." };
     }
+    if (visit.accepted_by_id && !confirmAccepted) {
+      return {
+        status: "needs-confirmation",
+        error: `A cleaner has already accepted your ${displayDayAndDate(date)} visit. If you skip it, they lose this job.`,
+        dates: [date],
+      };
+    }
 
     database.prepare("DELETE FROM bookings WHERE id = ?").run(visit.id);
     recordSkip(sub.id, date, sub.time_slot, "skip");
@@ -2295,6 +2306,7 @@ export function pauseSubscription(
   subscriptionId: string,
   customerEmail: string,
   resumeDate: string,
+  confirmAccepted = false,
 ): SubscriptionChangeResult {
   const today = localDateString();
   return withTransaction(() => {
@@ -2339,6 +2351,18 @@ export function pauseSubscription(
     }
 
     const paused = visits.filter((visit) => visit.service_date < resumeDate);
+    const accepted = paused.filter((visit) => visit.accepted_by_id);
+    if (accepted.length && !confirmAccepted) {
+      const dates = accepted.map((visit) => visit.service_date);
+      return {
+        status: "needs-confirmation",
+        error:
+          `A cleaner has already accepted ${dates.length === 1 ? "your" : `${dates.length} of your`} ` +
+          `${dates.map(displayDayAndDate).join(", ")} visit${dates.length === 1 ? "" : "s"}. ` +
+          `If you pause, they lose ${dates.length === 1 ? "this job" : "these jobs"}.`,
+        dates,
+      };
+    }
     for (const visit of paused) {
       database.prepare("DELETE FROM bookings WHERE id = ?").run(visit.id);
       recordSkip(sub.id, visit.service_date, sub.time_slot, "pause");

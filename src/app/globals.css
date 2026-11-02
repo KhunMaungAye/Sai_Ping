@@ -2347,9 +2347,18 @@ html {
   color: var(--ink);
   font-weight: 600;
 }
-.contact-list span {
-  display: inline-block;
-  width: 28px;
+.contact-list li {
+  display: flex;
+  gap: 12px;
+}
+.contact-label {
+  flex: 0 0 64px;
+  color: var(--brand-blue);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.9;
 }
 .contact-card {
   display: grid;
@@ -2749,4 +2758,181 @@ html {
 .special-instructions-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ---------- US-15: recurring plans (pause and skip) ---------- */
+.plan-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 20px;
+}
+.plan-card {
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 22px;
+  box-shadow: 0 4px 16px rgba(31, 52, 39, 0.035);
+}
+.plan-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #edf1f8;
+}
+.plan-card-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.plan-card-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.plan-status {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-family: var(--font-dm-mono), monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.plan-status.is-active {
+  background: #eef6fc;
+  color: #1971c2;
+  border: 1px solid #b8dafc;
+}
+.plan-status.is-paused {
+  background: #fef8ee;
+  color: #b46b0a;
+  border: 1px solid #f6d8a7;
+}
+.plan-status.is-cancelled {
+  background: #f0f3f8;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.plan-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 16px;
+  font-size: 14px;
+}
+.plan-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+}
+.plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: #c9d3e3;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.switch.is-on {
+  background: var(--brand-blue);
+}
+.switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.switch:focus-visible {
+  outline: 3px solid var(--brand-blue);
+  outline-offset: 3px;
+}
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(13, 27, 62, 0.25);
+  transition: transform 140ms ease;
+}
+.switch.is-on .switch-knob {
+  transform: translateX(18px);
+}
+.plan-pause-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--sky);
+}
+.plan-pause-form .text-input {
+  max-width: 240px;
+}
+.plan-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.plan-pause-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+.plan-success {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #eef6fc;
+  color: #145a9e;
+  font-size: 14px;
+}
+.plan-warning {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #f6d8a7;
+  border-radius: 8px;
+  background: #fef8ee;
+  color: #8a4f06;
+  font-size: 14px;
+}
+.plan-empty {
+  padding: 28px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: center;
+}
+.plan-empty h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.plan-empty p {
+  margin: 0;
+  color: var(--muted);
 }
