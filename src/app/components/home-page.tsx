@@ -92,7 +92,7 @@ export default function HomePage() {
               </a>
             ))}
             <span className="site-location">
-              <span aria-hidden="true">📍</span> Bangkok
+              Bangkok
             </span>
             {signedIn ? (
               <Link className="sunny-button small" href={dashboardPathFor(signedIn.role)}>
@@ -266,16 +266,16 @@ export default function HomePage() {
             </p>
             <ul className="contact-list">
               <li>
-                <span aria-hidden="true">📍</span> 88 Silom Rd, Bang Rak, Bangkok 10500, Thailand
+                <span className="contact-label">Address</span> 88 Silom Rd, Bang Rak, Bangkok 10500, Thailand
               </li>
               <li>
-                <span aria-hidden="true">📞</span> +66 2 123 4500
+                <span className="contact-label">Phone</span> +66 2 123 4500
               </li>
               <li>
-                <span aria-hidden="true">✉️</span> hello@saiping.co.th
+                <span className="contact-label">Email</span> hello@saiping.co.th
               </li>
               <li>
-                <span aria-hidden="true">🕘</span> Mon–Fri 8:00–18:00 · Sat–Sun 9:00–16:00
+                <span className="contact-label">Hours</span> Mon–Fri 8:00–18:00 · Sat–Sun 9:00–16:00
               </li>
             </ul>
           </div>

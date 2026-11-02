@@ -10,6 +10,7 @@ import {
   getDatabase,
   getDayNameFromDateString,
   getDayOfWeekFromDateString,
+  acceptBookingRequest,
   getUserByEmail,
   listAvailableSlots,
   listCustomerSubscriptions,
@@ -64,6 +65,13 @@ function call(handler, id, body, email = CUSTOMER) {
     }),
     { params: Promise.resolve({ id }) },
   );
+}
+
+function acceptVisit(date) {
+  const visit = getCustomerBookings(CUSTOMER).bookings.find((b) => b.date === date);
+  const cleaner = getUserByEmail("cleaner@saiping.com");
+  const result = acceptBookingRequest(visit.id, cleaner.cleanerId || cleaner.id, cleaner.name);
+  assert.strictEqual(result.success, true);
 }
 
 const visitDates = () =>
@@ -248,5 +256,47 @@ describe("US-15 pause and skip recurring cleanings", () => {
     assert.strictEqual(current.status, "active");
     assert.strictEqual(current.pausedUntil, null);
     assert.strictEqual(current.nextVisit.date, dates[0]);
+  });
+  test("Skipping a visit a cleaner accepted asks for confirmation first", async () => {
+    const { id, dates } = makePlan();
+    acceptVisit(dates[0]);
+
+    const first = await call(skipPOST, id, { date: dates[0] });
+    assert.strictEqual(first.status, 409);
+    const warning = await first.json();
+    assert.strictEqual(warning.needsConfirmation, true);
+    assert.deepStrictEqual(warning.dates, [dates[0]]);
+    assert.match(warning.error, /already accepted/);
+    assert.deepStrictEqual(visitDates(), dates, "nothing removed before confirming");
+
+    const confirmed = await call(skipPOST, id, { date: dates[0], confirmAccepted: true });
+    assert.strictEqual(confirmed.status, 200);
+    assert.deepStrictEqual(visitDates(), dates.slice(1));
+  });
+
+  test("Pausing over accepted visits asks for confirmation first", async () => {
+    const { id, dates } = makePlan();
+    acceptVisit(dates[1]);
+    const resumeDate = dates[2];
+
+    const first = await call(pausePOST, id, { resumeDate });
+    assert.strictEqual(first.status, 409);
+    const warning = await first.json();
+    assert.strictEqual(warning.needsConfirmation, true);
+    assert.deepStrictEqual(warning.dates, [dates[1]]);
+    assert.deepStrictEqual(visitDates(), dates, "nothing removed before confirming");
+    assert.strictEqual(plan(id).status, "active");
+
+    const confirmed = await call(pausePOST, id, { resumeDate, confirmAccepted: true });
+    assert.strictEqual(confirmed.status, 200);
+    assert.deepStrictEqual(visitDates(), dates.slice(2));
+    assert.strictEqual(plan(id).status, "paused");
+  });
+
+  test("Visits no cleaner has accepted are skipped without a warning", async () => {
+    const { id, dates } = makePlan();
+    acceptVisit(dates[1]);
+    const res = await call(skipPOST, id, { date: dates[0] });
+    assert.strictEqual(res.status, 200);
   });
 });

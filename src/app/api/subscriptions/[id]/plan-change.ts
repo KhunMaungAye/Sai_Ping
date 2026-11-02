@@ -1,7 +1,12 @@
 import { requireRole } from "../../../../lib/auth.ts";
 import type { SubscriptionChangeResult } from "../../../../lib/booking-store.ts";
 
-const STATUS_CODES = { "not-found": 404, invalid: 400, conflict: 409 } as const;
+const STATUS_CODES = {
+  "not-found": 404,
+  invalid: 400,
+  conflict: 409,
+  "needs-confirmation": 409,
+} as const;
 
 /**
  * Shared wrapper for the US-15 skip / pause / resume routes: only the
@@ -31,6 +36,13 @@ export async function handlePlanChange(
 
   const { id } = await params;
   const result = change(id, auth.user.email, body);
+  if (result.status === "needs-confirmation") {
+    // The client can resend with { confirmAccepted: true } to go ahead.
+    return Response.json(
+      { error: result.error, needsConfirmation: true, dates: result.dates },
+      { status: 409, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   if (result.status !== "ok") {
     return Response.json(
       { error: result.error },

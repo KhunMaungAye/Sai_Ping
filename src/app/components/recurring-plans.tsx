@@ -35,6 +35,7 @@ function displayTime(value: string) {
 }
 
 type Notice = { tone: "success" | "error"; text: string };
+type PendingConfirm = { action: "skip" | "pause"; body: object; text: string };
 
 /**
  * US-15: the customer's weekly / fortnightly plans with "Skip next date" and a
@@ -119,6 +120,7 @@ function PlanCard({
   const [resumeDate, setResumeDate] = useState("");
   const [busy, setBusy] = useState<"" | "skip" | "pause" | "resume">("");
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
 
   const minResume = addDays(today, 1);
   const maxResume = [addDays(today, MAX_PAUSE_DAYS), plan.lastVisitDate ?? addDays(today, MAX_PAUSE_DAYS)].sort()[0];
@@ -127,6 +129,7 @@ function PlanCard({
   async function send(action: "skip" | "pause" | "resume", body: object = {}) {
     setBusy(action);
     setNotice(null);
+    setPendingConfirm(null);
     try {
       const res = await fetch(`/api/subscriptions/${plan.id}/${action}`, {
         method: "POST",
@@ -136,8 +139,14 @@ function PlanCard({
       const data = (await res.json().catch(() => null)) as {
         message?: string;
         error?: string;
+        needsConfirmation?: boolean;
         subscription?: CustomerSubscription;
       } | null;
+      if (res.status === 409 && data?.needsConfirmation && action !== "resume") {
+        // A cleaner already accepted a visit this would remove: ask first.
+        setPendingConfirm({ action, body: { ...body, confirmAccepted: true }, text: data.error ?? "" });
+        return;
+      }
       if (!res.ok || !data?.subscription) {
         setNotice({ tone: "error", text: data?.error || "Something went wrong. Please try again." });
         return;
@@ -279,6 +288,25 @@ function PlanCard({
             </button>
           </div>
         </form>
+      ) : null}
+
+      {pendingConfirm ? (
+        <div className="plan-warning" role="alert">
+          <span>{pendingConfirm.text}</span>
+          <div className="plan-pause-buttons">
+            <button
+              type="button"
+              className="sunny-button small"
+              disabled={busy !== ""}
+              onClick={() => void send(pendingConfirm.action, pendingConfirm.body)}
+            >
+              {pendingConfirm.action === "skip" ? "Skip anyway" : "Pause anyway"}
+            </button>
+            <button type="button" className="text-button" onClick={() => setPendingConfirm(null)}>
+              Go back
+            </button>
+          </div>
+        </div>
       ) : null}
 
       {notice ? (
