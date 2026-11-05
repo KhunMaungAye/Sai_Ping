@@ -2936,3 +2936,65 @@ html {
   margin: 0;
   color: var(--muted);
 }
+
+/* AI-01A: recommended cleaner on the booking form */
+.recommend-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid #cfe0fb;
+  border-left: 4px solid var(--brand-blue);
+  border-radius: 10px;
+  background: var(--sky);
+}
+.recommend-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 700;
+  font-size: 17px;
+}
+.recommend-body {
+  min-width: 0;
+}
+.recommend-body p {
+  margin: 0;
+}
+.recommend-label {
+  color: var(--brand-blue);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.recommend-name {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.recommend-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 14px;
+}
+.recommend-hint,
+.recommend-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+.recommend-hint {
+  margin-top: 6px !important;
+}
+.recommend-note {
+  margin: 14px 0 0;
+}
