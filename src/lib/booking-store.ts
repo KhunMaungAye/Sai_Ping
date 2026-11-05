@@ -2489,3 +2489,144 @@ function displayDayAndDate(date: string) {
   }).format(new Date(Date.UTC(year, month - 1, day)));
   return `${getDayNameFromDateString(date)}, ${label}`;
 }
+
+/* ------------------------------------------------------------------ */
+/* AI-01A: recommended cleaner for a chosen date and arrival window.   */
+/* Rule-based score, not machine learning.                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Scoring rule from the AI-01A card. The weights, the job cap and the
+ * fallback threshold are still assumptions waiting for the Product Owner,
+ * so they live here in one place.
+ */
+export const RECOMMENDATION_RULES = {
+  ratingWeight: 0.7,
+  experienceWeight: 0.3,
+  jobCap: 20,
+  fallbackMinRating: 4.0,
+} as const;
+
+export type RecommendedCleaner = {
+  cleanerId: string;
+  name: string;
+  averageRating: number | null;
+  reviewCount: number;
+  completedJobs: number;
+  jobsThisWeek: number;
+  score: number;
+  /** "score": highest score among cleaners rated 4.0+; "fallback": fewest jobs this week. */
+  reason: "score" | "fallback";
+};
+
+/** Score = 0.7 × rating + 0.3 × 5 × min(jobs, 20) ÷ 20. An unrated cleaner counts as 0 stars. */
+export function scoreCleaner(averageRating: number | null, completedJobs: number) {
+  const { ratingWeight, experienceWeight, jobCap } = RECOMMENDATION_RULES;
+  const rating = averageRating ?? 0;
+  const experience = (5 * Math.min(Math.max(completedJobs, 0), jobCap)) / jobCap;
+  return Math.round((ratingWeight * rating + experienceWeight * experience) * 1000) / 1000;
+}
+
+/** Monday and Sunday of the week that contains `date` (YYYY-MM-DD). */
+function weekBounds(date: string) {
+  const sinceMonday = (getDayOfWeekFromDateString(date) + 6) % 7;
+  const monday = addDaysToDateString(date, -sinceMonday);
+  return { monday, sunday: addDaysToDateString(monday, 6) };
+}
+
+/**
+ * Picks the cleaner to recommend for `date` at `time`, or null when nobody is eligible.
+ *
+ * Eligible = an active cleaner account, works that weekday, and has no other job
+ * in that slot. Among cleaners rated 4.0 or more the highest score wins (ties: more
+ * completed jobs, then name). If none is rated 4.0+, the eligible cleaner with the
+ * fewest jobs that week is shown instead (ties: name).
+ */
+export function getRecommendedCleaner(
+  date: string,
+  time: BookingTime,
+): RecommendedCleaner | null {
+  const weekday = getDayOfWeekFromDateString(date);
+  const { monday, sunday } = weekBounds(date);
+
+  const rows = getDatabase()
+    .prepare(
+      `SELECT
+        cleaners.id AS cleaner_id,
+        users.name,
+        cleaners.available_days,
+        (SELECT AVG(r.stars) FROM ratings r WHERE r.cleaner_id = cleaners.id) AS average_rating,
+        (SELECT COUNT(*) FROM ratings r WHERE r.cleaner_id = cleaners.id) AS review_count,
+        (SELECT COUNT(*) FROM bookings b
+          WHERE b.accepted_by_id = cleaners.id AND b.status = 'completed') AS completed_jobs,
+        (SELECT COUNT(*) FROM bookings b
+          WHERE b.accepted_by_id = cleaners.id
+            AND b.service_date BETWEEN ? AND ?) AS jobs_this_week,
+        (SELECT COUNT(*) FROM bookings b
+          WHERE b.accepted_by_id = cleaners.id
+            AND b.service_date = ? AND b.time_slot = ?) AS jobs_in_slot
+      FROM users
+      JOIN cleaners ON cleaners.id = users.cleaner_id
+      WHERE users.role = 'cleaner' AND users.status = 'active'`,
+    )
+    .all(monday, sunday, date, time) as Array<{
+    cleaner_id: string;
+    name: string;
+    available_days: string;
+    average_rating: number | null;
+    review_count: number;
+    completed_jobs: number;
+    jobs_this_week: number;
+    jobs_in_slot: number;
+  }>;
+
+  const eligible = rows
+    .filter(
+      (row) =>
+        parseWeekdays(row.available_days).includes(weekday) && row.jobs_in_slot === 0,
+    )
+    .map((row) => {
+      const averageRating =
+        row.average_rating === null ? null : Math.round(row.average_rating * 10) / 10;
+      return {
+        cleanerId: row.cleaner_id,
+        name: row.name,
+        averageRating,
+        reviewCount: row.review_count,
+        completedJobs: row.completed_jobs,
+        jobsThisWeek: row.jobs_this_week,
+        // Score and threshold use the exact average, not the rounded one shown to customers.
+        exactRating: row.average_rating,
+        score: scoreCleaner(row.average_rating, row.completed_jobs),
+      };
+    });
+
+  if (eligible.length === 0) return null;
+
+  const wellRated = eligible.filter(
+    (cleaner) =>
+      cleaner.exactRating !== null &&
+      cleaner.exactRating >= RECOMMENDATION_RULES.fallbackMinRating,
+  );
+
+  let pick: (typeof eligible)[number];
+  let reason: RecommendedCleaner["reason"];
+  if (wellRated.length > 0) {
+    wellRated.sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.completedJobs - a.completedJobs ||
+        a.name.localeCompare(b.name),
+    );
+    [pick, reason] = [wellRated[0], "score"];
+  } else {
+    eligible.sort(
+      (a, b) => a.jobsThisWeek - b.jobsThisWeek || a.name.localeCompare(b.name),
+    );
+    [pick, reason] = [eligible[0], "fallback"];
+  }
+
+  const { exactRating: _exactRating, ...shown } = pick;
+  void _exactRating;
+  return { ...shown, reason };
+}

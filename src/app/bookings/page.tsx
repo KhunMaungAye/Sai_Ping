@@ -17,6 +17,7 @@ import {
   getNextServiceDate,
 } from "@/lib/date-utils";
 import { RecurringPlans } from "../components/recurring-plans";
+import { RecommendedCleaner } from "../components/recommended-cleaner";
 
 function dateString(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
@@ -790,6 +791,14 @@ export default function CustomerBookingsPage() {
                           ))}
                         </div>
                       )}
+                      {/* AI-01A: recommended cleaner for the chosen date and window */}
+                      {scheduleMode === "one-time" &&
+                        availability === "ready" &&
+                        date &&
+                        time &&
+                        availableSlots.includes(time) && (
+                          <RecommendedCleaner date={date} time={time} />
+                        )}
                     </fieldset>
 
                     {/* Step 5: Address */}
