@@ -3064,3 +3064,70 @@ html {
 .recommend-note {
   margin: 14px 0 0;
 }
+
+/* US-17A: admin Bookings tab status filter */
+.booking-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.booking-filter-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.booking-filter-button:hover {
+  border-color: var(--brand-blue);
+}
+
+.booking-filter-button:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+.booking-filter-button.is-active {
+  border-color: var(--navy);
+  background: var(--navy);
+  color: #fff;
+}
+
+.booking-filter-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+  text-align: center;
+}
+
+.booking-filter-button.is-active .booking-filter-count {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+@media (max-width: 420px) {
+  .booking-filter-bar {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .booking-filter-button {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+}

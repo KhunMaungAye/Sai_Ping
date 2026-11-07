@@ -10,6 +10,14 @@ import type {
   User,
 } from "@/lib/booking-store";
 import {
+  type BookingStatusFilter,
+  BOOKING_STATUS_FILTERS,
+  NO_MATCHING_BOOKINGS_MESSAGE,
+  adminCleanerLabel,
+  countBookingsByStatus,
+  filterAdminBookings,
+} from "@/lib/admin-bookings";
+import {
   type CleanerRatingSort,
   formatAverageRating,
   sortCleanerSummaries,
@@ -69,6 +77,7 @@ export default function AdminDashboardPage() {
     totalRevenueCents: 0,
   });
   const [bookings, setBookings] = useState<AdminBooking[]>([]);
+  const [bookingFilter, setBookingFilter] = useState<BookingStatusFilter>("all");
   const [users, setUsers] = useState<User[]>([]);
   const [actionMessage, setActionMessage] = useState("");
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
@@ -147,6 +156,10 @@ export default function AdminDashboardPage() {
   }
 
   const handleSignOut = signOut;
+
+  // US-17A: status filter on the Bookings tab, sorted by date, then time slot.
+  const visibleBookings = filterAdminBookings(bookings, bookingFilter);
+  const bookingCounts = countBookingsByStatus(bookings);
 
   if (session.status === "error") {
     return (
@@ -325,6 +338,20 @@ export default function AdminDashboardPage() {
         {/* Panel 1: All Bookings Table with Cleaner Acceptance Information */}
         {activeTab === "bookings" ? (
           <section className="tab-panel">
+            <div className="booking-filter-bar" role="group" aria-label="Filter bookings by status">
+              {BOOKING_STATUS_FILTERS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`booking-filter-button${bookingFilter === option.value ? " is-active" : ""}`}
+                  aria-pressed={bookingFilter === option.value}
+                  onClick={() => setBookingFilter(option.value)}
+                >
+                  {option.label}
+                  <span className="booking-filter-count">{bookingCounts[option.value]}</span>
+                </button>
+              ))}
+            </div>
             <div className="table-responsive-wrapper">
               <table className="admin-table">
                 <thead>
@@ -334,12 +361,12 @@ export default function AdminDashboardPage() {
                     <th>Service & Location</th>
                     <th>Date & Arrival</th>
                     <th>Price</th>
-                    <th>Cleaner Acceptance</th>
+                    <th>Cleaner</th>
                     <th>Service Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {bookings.map((b) => (
+                  {visibleBookings.map((b) => (
                     <tr key={b.id}>
                       <td>
                         <strong className="ref-tag">{b.id.slice(0, 8).toUpperCase()}</strong>
@@ -370,7 +397,7 @@ export default function AdminDashboardPage() {
                           <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                             <span className="status-badge status-badge-accepted">
                               <span className="status-indicator-dot" aria-hidden="true" />
-                              Accepted: {b.acceptedByName}
+                              {adminCleanerLabel(b)}
                             </span>
                             {b.acceptedAt ? (
                               <span style={{ fontSize: "11px", color: "var(--muted)" }}>
@@ -381,7 +408,7 @@ export default function AdminDashboardPage() {
                         ) : (
                           <span className="status-badge status-badge-pending">
                             <span className="status-indicator-dot" aria-hidden="true" />
-                            Awaiting Acceptance
+                            {adminCleanerLabel(b)}
                           </span>
                         )}
                       </td>
@@ -399,10 +426,10 @@ export default function AdminDashboardPage() {
                       </td>
                     </tr>
                   ))}
-                  {bookings.length === 0 ? (
+                  {visibleBookings.length === 0 ? (
                     <tr>
                       <td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
-                        No bookings on file.
+                        {bookings.length === 0 ? "No bookings on file." : NO_MATCHING_BOOKINGS_MESSAGE}
                       </td>
                     </tr>
                   ) : null}

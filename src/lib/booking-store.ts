@@ -1757,6 +1757,7 @@ export function getBookingAssignment(
     : null;
 }
 
+/** US-17A: every booking for the admin Bookings tab, sorted by date, then time slot. */
 export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: string }> {
   const database = getDatabase();
   const rows = database
@@ -1785,7 +1786,7 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
       FROM bookings
       JOIN cleaners ON cleaners.id = bookings.cleaner_id
       LEFT JOIN ratings ON ratings.booking_id = bookings.id
-      ORDER BY bookings.service_date DESC, bookings.time_slot ASC`
+      ORDER BY bookings.service_date ASC, bookings.time_slot ASC`
     )
     .all() as Array<{
       id: string;
