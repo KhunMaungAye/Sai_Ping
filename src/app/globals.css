@@ -1688,6 +1688,72 @@ a {
   color: var(--muted);
 }
 
+/* US-17B: admin cleaner rating summary */
+.cleaner-rating-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+
+.cleaner-rating-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.cleaner-rating-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.cleaner-rating-sort select {
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+}
+
+.admin-table tr.is-suspended-row td {
+  background: #fdf6f5;
+  color: var(--muted);
+}
+
+/* Shown under the name so the state is visible without scrolling the table on phones */
+.cleaner-suspended-tag {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #fbeae8;
+  color: var(--coral);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+@media (max-width: 480px) {
+  .cleaner-rating-sort {
+    width: 100%;
+  }
+
+  .cleaner-rating-sort select {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 /* Reviews */
 .review-list {
   display: grid;

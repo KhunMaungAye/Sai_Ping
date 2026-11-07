@@ -9,6 +9,11 @@ import type {
   CustomerBooking,
   User,
 } from "@/lib/booking-store";
+import {
+  type CleanerRatingSort,
+  formatAverageRating,
+  sortCleanerSummaries,
+} from "@/lib/cleaner-ratings";
 import { signOut, useSession } from "@/lib/use-session";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -53,6 +58,7 @@ export default function AdminDashboardPage() {
     "bookings" | "cleaners" | "customers" | "reviews" | "users"
   >("bookings");
   const [cleaners, setCleaners] = useState<AdminCleanerSummary[]>([]);
+  const [cleanerSort, setCleanerSort] = useState<CleanerRatingSort>("name");
   const [customers, setCustomers] = useState<AdminCustomerSummary[]>([]);
   const [reviews, setReviews] = useState<AdminReview[]>([]);
   const [stats, setStats] = useState({
@@ -408,28 +414,67 @@ export default function AdminDashboardPage() {
 
         {activeTab === "cleaners" ? (
           <section className="tab-panel">
+            <div className="cleaner-rating-toolbar">
+              <p className="cleaner-rating-hint">
+                Ratings come from customers after each completed cleaning.
+              </p>
+              <label className="cleaner-rating-sort">
+                <span>Sort by</span>
+                <select
+                  value={cleanerSort}
+                  onChange={(event) => setCleanerSort(event.target.value as CleanerRatingSort)}
+                >
+                  <option value="name">Name (A–Z)</option>
+                  <option value="rating-asc">Average rating (lowest first)</option>
+                </select>
+              </label>
+            </div>
             <div className="table-responsive-wrapper">
               <table className="admin-table">
                 <thead>
                   <tr>
                     <th>Cleaner</th>
-                    <th>Available Days</th>
+                    <th aria-sort={cleanerSort === "rating-asc" ? "ascending" : "none"}>
+                      Average Rating
+                    </th>
+                    <th>Ratings</th>
+                    <th>Completed Jobs</th>
                     <th>Upcoming Jobs</th>
-                    <th>Completed</th>
+                    <th>Available Days</th>
                     <th>Earnings</th>
-                    <th>Rating</th>
                     <th>Account</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {cleaners.map((c) => (
-                    <tr key={c.userId}>
+                  {sortCleanerSummaries(cleaners, cleanerSort).map((c) => (
+                    <tr
+                      key={c.userId}
+                      className={c.status === "suspended" ? "is-suspended-row" : undefined}
+                    >
                       <td>
                         <div style={{ display: "flex", flexDirection: "column" }}>
                           <strong>{c.name}</strong>
                           <span style={{ fontSize: "11px", color: "var(--muted)" }}>{c.email}</span>
+                          {c.status === "suspended" ? (
+                            <span className="cleaner-suspended-tag">Suspended</span>
+                          ) : null}
                         </div>
                       </td>
+                      <td>
+                        {c.averageRating === null ? (
+                          <span style={{ fontSize: "12px", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                            {formatAverageRating(null)}
+                          </span>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <strong>{formatAverageRating(c.averageRating)} / 5</strong>
+                            <Stars value={c.averageRating} />
+                          </div>
+                        )}
+                      </td>
+                      <td>{c.reviewCount}</td>
+                      <td>{c.completedJobs}</td>
+                      <td>{c.upcomingJobs}</td>
                       <td>
                         <div className="weekday-chips">
                           {WEEKDAY_SHORT.map((label, day) => (
@@ -442,22 +487,8 @@ export default function AdminDashboardPage() {
                           ))}
                         </div>
                       </td>
-                      <td>{c.upcomingJobs}</td>
-                      <td>{c.completedJobs}</td>
                       <td>
                         <strong>{displayPrice(c.earningsCents)}</strong>
-                      </td>
-                      <td>
-                        {c.averageRating === null ? (
-                          <span style={{ fontSize: "12px", color: "var(--muted)" }}>No ratings yet</span>
-                        ) : (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <Stars value={c.averageRating} />
-                            <span style={{ fontSize: "11px", color: "var(--muted)" }}>
-                              {c.averageRating.toFixed(1)} from {c.reviewCount} review{c.reviewCount === 1 ? "" : "s"}
-                            </span>
-                          </div>
-                        )}
                       </td>
                       <td>
                         <span
@@ -472,7 +503,7 @@ export default function AdminDashboardPage() {
                   ))}
                   {cleaners.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
+                      <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
                         No cleaner accounts yet.
                       </td>
                     </tr>
