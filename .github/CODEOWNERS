@@ -1,0 +1,4 @@
+# Every change to Sai Ping needs an approval from a teammate (Definition of Done, point 4).
+# With "Require review from Code Owners" on, only these people's approvals count,
+# and GitHub never counts the author's own approval.
+* @KhunMaungAye @Thida-Khaing-may @kxkhantx

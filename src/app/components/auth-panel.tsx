@@ -74,6 +74,12 @@ function remember(email: string, role: AuthRole) {
   } catch {}
 }
 
+function forgetRemembered() {
+  try {
+    window.localStorage.removeItem(REMEMBER_KEY);
+  } catch {}
+}
+
 /**
  * Sign-in and sign-up form shared by the home page pop-up and /login.
  * The role tiles only steer the form; the server decides the real role.
@@ -100,27 +106,46 @@ export function AuthPanel({
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [rememberedEmail, setRememberedEmail] = useState("");
 
-  // Returning visitors don't need to retype their email (US-12)
+  // Returning visitors don't need to retype their email on sign-in (US-12).
+  // A new account starts with an empty email, so the last user's address never carries over.
   useEffect(() => {
     const saved = readRemembered();
     if (!saved) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only readable after mount
+    setRememberedEmail(saved.email);
+    if (initialMode !== "sign-in" && initialRole !== "admin") return;
     setEmail(saved.email);
-    if (!initialRole && initialMode === "sign-in") setRole(saved.role);
+    if (!initialRole) setRole(saved.role);
   }, [initialRole, initialMode]);
 
   const isSignUp = mode === "sign-up" && role !== "admin";
+  const showingRememberedEmail = !isSignUp && rememberedEmail !== "" && email === rememberedEmail;
 
   function chooseRole(next: AuthRole) {
     setRole(next);
-    if (next === "admin") setMode("sign-in");
+    if (next === "admin") {
+      setMode("sign-in");
+      if (!email && rememberedEmail) setEmail(rememberedEmail);
+    }
     setErrorMessage("");
   }
 
   function chooseMode(next: AuthMode) {
     setMode(next);
+    // Create account never shows the remembered address; Sign in brings it back if the box is empty.
+    if (next === "sign-up" && email === rememberedEmail) setEmail("");
+    if (next === "sign-in" && !email && rememberedEmail) setEmail(rememberedEmail);
     setErrorMessage("");
+  }
+
+  function clearRememberedEmail() {
+    forgetRemembered();
+    setRememberedEmail("");
+    setEmail("");
+    setErrorMessage("");
+    document.getElementById(`${headingId}-email`)?.focus();
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -293,9 +318,19 @@ export function AuthPanel({
           </label>
         ) : null}
 
-        <label className="auth-field">
-          <span className="field-label">Email address</span>
+        <div className="auth-field">
+          <div className="auth-field-row">
+            <label className="field-label" htmlFor={`${headingId}-email`}>
+              Email address
+            </label>
+            {showingRememberedEmail ? (
+              <button type="button" className="show-hide-toggle" onClick={clearRememberedEmail}>
+                Use another email
+              </button>
+            ) : null}
+          </div>
           <input
+            id={`${headingId}-email`}
             type="email"
             autoComplete="email"
             className="text-input"
@@ -307,7 +342,7 @@ export function AuthPanel({
               setErrorMessage("");
             }}
           />
-        </label>
+        </div>
 
         <div className="auth-field">
           <div className="auth-field-row">
