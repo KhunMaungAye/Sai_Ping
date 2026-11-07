@@ -847,14 +847,21 @@ export default function CustomerBookingsPage() {
 
                     {/* Summary & Submit */}
                     <div style={{ padding: "16px", background: "#f8faf8", borderRadius: "8px", marginBottom: "20px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+                        <div style={{ minWidth: 0 }}>
                           <strong style={{ fontSize: "16px" }}>{selectedService.name}</strong>
                           <div style={{ fontSize: "13px", color: "var(--muted)", marginTop: "2px" }}>
                             {scheduleMode.toUpperCase()} • {date ? displayDate(date) : "Select date"} at {time ? displayTime(time) : "Select time"}
                           </div>
+                          {/* US-01 AC1: show the cleaning location before confirmation */}
+                          <div
+                            data-testid="summary-address"
+                            style={{ fontSize: "13px", color: address.trim() ? "var(--ink)" : "var(--muted)", marginTop: "4px", overflowWrap: "anywhere" }}
+                          >
+                            Location: {address.trim() || "Add your address above"}
+                          </div>
                         </div>
-                        <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--green)" }}>
+                        <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--green)", flex: "none" }}>
                           {displayPrice(selectedService.priceCents)}
                         </div>
                       </div>
