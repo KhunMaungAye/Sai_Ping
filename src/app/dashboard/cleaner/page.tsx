@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CleanerCancelledJob, CustomerBooking } from "@/lib/booking-store";
+import { getServiceStartTime } from "@/lib/services";
 import { signOut, useSession } from "@/lib/use-session";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -518,6 +519,14 @@ export default function CleanerDashboardPage() {
                         </div>
                       </div>
 
+                      <VisitControls
+                        job={job}
+                        onUpdated={(message, isError) => {
+                          showStatus(message, isError);
+                          if (!isError) setRefresh((v) => v + 1);
+                        }}
+                      />
+
                       <div className="booking-card-footer">
                         <div className="booking-ref-id">
                           <span>REF</span>
@@ -714,6 +723,110 @@ function CancelledJobsList({ jobs }: { jobs: CleanerCancelledJob[] }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/** Today's date in Bangkok (UTC+7), where all visits happen. */
+function bangkokToday() {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function clockTime(iso: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Asia/Bangkok",
+  }).format(new Date(iso));
+}
+
+/**
+ * US-09: on the day of a job, the cleaner checks in on arrival or tells the
+ * admin they're running late. Without either, the admin gets a no-show alert
+ * 15 minutes after the expected arrival time.
+ */
+function VisitControls({
+  job,
+  onUpdated,
+}: {
+  job: CustomerBooking;
+  onUpdated: (message: string, isError: boolean) => void;
+}) {
+  const [busy, setBusy] = useState<"check-in" | "late" | null>(null);
+  const [lateMinutes, setLateMinutes] = useState(15);
+
+  if (job.date > bangkokToday()) return null;
+
+  if (job.arrivedAt) {
+    return (
+      <p className="visit-panel visit-panel-done" role="status">
+        <span aria-hidden="true">✓</span> Checked in at {clockTime(job.arrivedAt)}
+      </p>
+    );
+  }
+
+  const expected = job.arriveBy ? new Date(job.arriveBy) : getServiceStartTime(job.date, job.time);
+
+  async function send(kind: "check-in" | "late") {
+    setBusy(kind);
+    try {
+      const res = await fetch(
+        `/api/cleaner/bookings/${job.id}/${kind === "check-in" ? "check-in" : "running-late"}`,
+        kind === "check-in"
+          ? { method: "POST" }
+          : {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ minutes: lateMinutes }),
+            },
+      );
+      const data = (await res.json().catch(() => null)) as { message?: string; error?: string } | null;
+      if (!res.ok) throw new Error(data?.error ?? "Could not send your update.");
+      onUpdated(data?.message ?? "Updated.", false);
+    } catch (err) {
+      onUpdated(err instanceof Error ? err.message : "Could not send your update.", true);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="visit-panel">
+      <p className="visit-panel-note">
+        {job.lateMinutes
+          ? `You said you'd be ${job.lateMinutes} minutes late. Expected by ${clockTime(expected.toISOString())}.`
+          : `Check in when you arrive. Expected by ${clockTime(expected.toISOString())}.`}
+      </p>
+      <div className="visit-panel-actions">
+        <button
+          type="button"
+          className="confirm-button visit-check-in"
+          disabled={busy !== null}
+          onClick={() => send("check-in")}
+        >
+          {busy === "check-in" ? "Checking in…" : "I've arrived"}
+        </button>
+        <label className="visit-late">
+          <select
+            aria-label="How many minutes late"
+            value={lateMinutes}
+            onChange={(event) => setLateMinutes(Number(event.target.value))}
+            disabled={busy !== null}
+          >
+            <option value={15}>15 min</option>
+            <option value={30}>30 min</option>
+            <option value={45}>45 min</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="visit-late-button"
+          disabled={busy !== null}
+          onClick={() => send("late")}
+        >
+          {busy === "late" ? "Sending…" : "Running late"}
+        </button>
+      </div>
     </div>
   );
 }
