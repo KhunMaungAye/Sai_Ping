@@ -54,3 +54,29 @@ export function parseSpecialInstructions(raw: unknown): SpecialInstructionsResul
   }
   return { ok: true, value: value || null };
 }
+
+/** US-05: a booking can be cancelled up to this many hours before it starts. */
+export const CANCELLATION_NOTICE_HOURS = 24;
+
+/** Sai Ping works in Bangkok (UTC+7, no daylight saving), so visit times are Bangkok times. */
+const SERVICE_UTC_OFFSET = "+07:00";
+
+/** The moment a visit starts, e.g. ("2026-11-20", "09:00") -> 09:00 Bangkok time. */
+export function getServiceStartTime(date: string, time: string): Date {
+  return new Date(`${date}T${time}:00${SERVICE_UTC_OFFSET}`);
+}
+
+/**
+ * US-05 rule, shared by the customer page (to show the button) and the API
+ * (which enforces it): cancelling is allowed when the visit starts at least
+ * 24 hours from `now`. Exactly 24 hours is allowed.
+ */
+export function isWithinCancellationWindow(
+  date: string,
+  time: string,
+  now: Date = new Date(),
+): boolean {
+  const start = getServiceStartTime(date, time).getTime();
+  if (Number.isNaN(start)) return false;
+  return start - now.getTime() >= CANCELLATION_NOTICE_HOURS * 60 * 60 * 1000;
+}

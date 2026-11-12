@@ -3,7 +3,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { AvailableDay, CustomerBooking } from "@/lib/booking-store";
+import type {
+  AvailableDay,
+  CancelledBooking,
+  CustomerBooking,
+} from "@/lib/booking-store";
 import {
   SERVICES,
   SPECIAL_INSTRUCTIONS_MAX_LENGTH,
@@ -66,6 +70,7 @@ export default function CustomerBookingsPage() {
   const [apiError, setApiError] = useState("");
   const [bookingSuccessMsg, setBookingSuccessMsg] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [cancelledBookings, setCancelledBookings] = useState<CancelledBooking[]>([]);
 
   // Booking Form State
   const [serviceId, setServiceId] = useState<ServiceId>("essential");
@@ -127,6 +132,7 @@ export default function CustomerBookingsPage() {
           bookings?: CustomerBooking[];
           upcoming?: CustomerBooking[];
           previous?: CustomerBooking[];
+          cancelled?: CancelledBooking[];
           error?: string;
         };
 
@@ -141,6 +147,7 @@ export default function CustomerBookingsPage() {
         setUpcomingBookings(data.upcoming ?? []);
         setPreviousBookings(data.previous ?? []);
         setAllBookings(data.bookings ?? []);
+        setCancelledBookings(data.cancelled ?? []);
       })
       .catch((err: unknown) => {
         if (err instanceof Error && err.name === "AbortError") return;
@@ -379,6 +386,13 @@ export default function CustomerBookingsPage() {
     router.replace("/login");
   }
 
+  // US-05: show the cancellation confirmation at the top and reload the lists.
+  function handleCancelled(message: string) {
+    setBookingSuccessMsg(message);
+    setRefresh((v) => v + 1);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -491,7 +505,7 @@ export default function CustomerBookingsPage() {
                 onClick={() => setActiveTab("previous")}
               >
                 <span>Previous Cleanings</span>
-                <span className="tab-badge">{previousBookings.length}</span>
+                <span className="tab-badge">{previousBookings.length + cancelledBookings.length}</span>
               </button>
 
               <button
@@ -503,7 +517,7 @@ export default function CustomerBookingsPage() {
                 onClick={() => setActiveTab("all")}
               >
                 <span>All Bookings</span>
-                <span className="tab-badge">{allBookings.length}</span>
+                <span className="tab-badge">{allBookings.length + cancelledBookings.length}</span>
               </button>
 
               <button
@@ -550,7 +564,7 @@ export default function CustomerBookingsPage() {
                 ) : (
                   <div className="booking-card-list">
                     {upcomingBookings.map((booking) => (
-                      <BookingCard key={booking.id} booking={booking} onRated={() => setRefresh((v) => v + 1)} />
+                      <BookingCard key={booking.id} booking={booking} onRated={() => setRefresh((v) => v + 1)} onCancelled={handleCancelled} />
                     ))}
                   </div>
                 )}
@@ -560,7 +574,7 @@ export default function CustomerBookingsPage() {
             {/* Tab Panel: Previous */}
             {activeTab === "previous" ? (
               <section id="panel-previous" role="tabpanel" className="tab-panel">
-                {previousBookings.length === 0 ? (
+                {previousBookings.length === 0 && cancelledBookings.length === 0 ? (
                   <EmptyBookingsView
                     title="No previous cleanings found"
                     description="Your completed and past service records will appear here after cleanings are finished."
@@ -568,11 +582,16 @@ export default function CustomerBookingsPage() {
                     onAction={() => setActiveTab("book-new")}
                   />
                 ) : (
-                  <div className="booking-card-list">
-                    {previousBookings.map((booking) => (
-                      <BookingCard key={booking.id} booking={booking} onRated={() => setRefresh((v) => v + 1)} />
-                    ))}
-                  </div>
+                  <>
+                    {previousBookings.length > 0 ? (
+                      <div className="booking-card-list">
+                        {previousBookings.map((booking) => (
+                          <BookingCard key={booking.id} booking={booking} onRated={() => setRefresh((v) => v + 1)} onCancelled={handleCancelled} />
+                        ))}
+                      </div>
+                    ) : null}
+                    <CancelledBookingsList bookings={cancelledBookings} />
+                  </>
                 )}
               </section>
             ) : null}
@@ -580,7 +599,7 @@ export default function CustomerBookingsPage() {
             {/* Tab Panel: All */}
             {activeTab === "all" ? (
               <section id="panel-all" role="tabpanel" className="tab-panel">
-                {allBookings.length === 0 ? (
+                {allBookings.length === 0 && cancelledBookings.length === 0 ? (
                   <EmptyBookingsView
                     title="No bookings on file"
                     description="No service appointments are associated with this account."
@@ -596,7 +615,7 @@ export default function CustomerBookingsPage() {
                       {upcomingBookings.length > 0 ? (
                         <div className="booking-card-list">
                           {upcomingBookings.map((b) => (
-                            <BookingCard key={b.id} booking={b} onRated={() => setRefresh((v) => v + 1)} />
+                            <BookingCard key={b.id} booking={b} onRated={() => setRefresh((v) => v + 1)} onCancelled={handleCancelled} />
                           ))}
                         </div>
                       ) : (
@@ -611,13 +630,15 @@ export default function CustomerBookingsPage() {
                       {previousBookings.length > 0 ? (
                         <div className="booking-card-list">
                           {previousBookings.map((b) => (
-                            <BookingCard key={b.id} booking={b} onRated={() => setRefresh((v) => v + 1)} />
+                            <BookingCard key={b.id} booking={b} onRated={() => setRefresh((v) => v + 1)} onCancelled={handleCancelled} />
                           ))}
                         </div>
                       ) : (
                         <p className="empty-subtext">No previous cleanings.</p>
                       )}
                     </div>
+
+                    <CancelledBookingsList bookings={cancelledBookings} />
                   </>
                 )}
               </section>
@@ -889,13 +910,44 @@ export default function CustomerBookingsPage() {
 function BookingCard({
   booking,
   onRated,
+  onCancelled,
 }: {
   booking: CustomerBooking;
   onRated: () => void;
+  onCancelled: (message: string) => void;
 }) {
   const isCompleted = booking.status === "completed";
   const isAccepted = Boolean(booking.acceptedByName || booking.isAccepted);
   const [isRating, setIsRating] = useState(false);
+  // US-05: cancelling asks for a second click, then calls the API.
+  const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+  const showCancelOption = !isCompleted && booking.isUpcoming;
+
+  async function confirmCancel() {
+    setIsCancelling(true);
+    setCancelError("");
+    try {
+      const response = await fetch(`/api/bookings/${booking.id}/cancel`, {
+        method: "POST",
+        cache: "no-store",
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        message?: string;
+        error?: string;
+      };
+      if (!response.ok) {
+        setCancelError(data.error ?? "Your booking could not be cancelled. Please try again.");
+        setIsCancelling(false);
+        return;
+      }
+      onCancelled(data.message ?? "Your booking has been cancelled.");
+    } catch {
+      setCancelError("Your booking could not be cancelled. Please try again.");
+      setIsCancelling(false);
+    }
+  }
 
   return (
     <article className="customer-booking-card" aria-label={`${booking.serviceName} on ${booking.date}`}>
@@ -1003,8 +1055,63 @@ function BookingCard({
               Request placed — awaiting cleaner acceptance
             </span>
           )}
+          {showCancelOption && booking.canCancel && !isConfirmingCancel ? (
+            <button
+              type="button"
+              className="cancel-booking-link"
+              onClick={() => {
+                setCancelError("");
+                setIsConfirmingCancel(true);
+              }}
+            >
+              Cancel booking
+            </button>
+          ) : null}
         </div>
       </div>
+
+      {showCancelOption && !booking.canCancel ? (
+        <p className="cancel-booking-note">
+          {booking.subscriptionId
+            ? "This visit is part of a recurring plan. To cancel just this visit, use Skip in My plans."
+            : "This booking can no longer be cancelled online because it starts in less than 24 hours."}
+        </p>
+      ) : null}
+
+      {showCancelOption && booking.canCancel && isConfirmingCancel ? (
+        <div className="cancel-booking-confirm" role="group" aria-label="Confirm cancellation">
+          <p>
+            <strong>Cancel this cleaning on {displayDate(booking.date)} at {displayTime(booking.time)}?</strong>{" "}
+            {booking.acceptedByName
+              ? `${booking.acceptedByName} has already accepted it, and the job will be removed from their list. `
+              : ""}
+            You won&apos;t be charged.
+          </p>
+          {cancelError ? (
+            <p className="form-error" role="alert">
+              {cancelError}
+            </p>
+          ) : null}
+          <div className="cancel-booking-actions">
+            <button
+              type="button"
+              className="cancel-booking-confirm-button"
+              onClick={confirmCancel}
+              disabled={isCancelling}
+            >
+              {isCancelling ? "Cancelling…" : "Yes, cancel booking"}
+            </button>
+            <button
+              type="button"
+              className="inline-button"
+              onClick={() => setIsConfirmingCancel(false)}
+              disabled={isCancelling}
+            >
+              Keep booking
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {isCompleted && booking.rating !== null && booking.review ? (
         <p className="submitted-review">Your review: “{booking.review}”</p>
@@ -1018,6 +1125,34 @@ function BookingCard({
         />
       ) : null}
     </article>
+  );
+}
+
+/** US-05: the customer's cancelled bookings, shown under Previous and All. */
+function CancelledBookingsList({ bookings }: { bookings: CancelledBooking[] }) {
+  if (bookings.length === 0) return null;
+  return (
+    <div className="all-section-group cancelled-bookings-group">
+      <div className="section-divider-header">
+        <h2>Cancelled ({bookings.length})</h2>
+      </div>
+      <ul className="cancelled-bookings-list">
+        {bookings.map((b) => (
+          <li key={b.id} className="cancelled-booking-row">
+            <div>
+              <strong>{b.serviceName}</strong>
+              <span>
+                {displayDate(b.date)} · {displayTime(b.time)} · {b.address}
+              </span>
+            </div>
+            <span className="status-badge status-badge-cancelled">
+              <span className="status-indicator-dot" aria-hidden="true" />
+              Cancelled
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

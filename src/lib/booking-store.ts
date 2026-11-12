@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   SERVICES,
   TIME_SLOTS,
+  isWithinCancellationWindow,
   type BookingTime,
   type ServiceId,
 } from "./services.ts";
@@ -81,7 +82,28 @@ export type CustomerBooking = {
   rating: number | null;
   review: string | null;
   isUpcoming: boolean;
+  /** US-05: true when the customer may cancel this booking right now. */
+  canCancel?: boolean;
 };
+
+/** US-05: a booking the customer cancelled, kept for their history. */
+export type CancelledBooking = {
+  id: string;
+  serviceName: string;
+  priceCents: number;
+  date: string;
+  time: BookingTime;
+  address: string;
+  cancelledAt: string;
+};
+
+export type CancelBookingResult =
+  | { status: "cancelled"; booking: CancelledBooking; message: string }
+  | { status: "already-cancelled"; booking: CancelledBooking; message: string }
+  | { status: "not-found" }
+  | { status: "completed" }
+  | { status: "recurring" }
+  | { status: "too-late" };
 
 export type BookingRatingDetails = {
   id: string;
@@ -363,6 +385,31 @@ function initDatabaseSchema(database: DatabaseSync) {
       UNIQUE (subscription_id, service_date)
     );
   `);
+
+  // US-05: a cancelled booking is moved here and removed from `bookings`, so
+  // its arrival window (UNIQUE service_date + time_slot) is free to book again
+  // while the customer still sees the cancellation in their history.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS cancelled_bookings (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      service_id TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      price_cents INTEGER NOT NULL,
+      service_date TEXT NOT NULL,
+      time_slot TEXT NOT NULL,
+      address TEXT NOT NULL,
+      special_instructions TEXT,
+      accepted_by_id TEXT,
+      accepted_by_name TEXT,
+      created_at TEXT NOT NULL,
+      cancelled_at TEXT NOT NULL
+    );
+  `);
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_cancelled_bookings_email ON cancelled_bookings (LOWER(email), cancelled_at);",
+  );
 }
 
 export function getDatabase(customPath?: string) {
@@ -1156,6 +1203,10 @@ export function getCustomerBookings(customerEmail: string) {
       rating: row.rating ?? null,
       review: row.review ?? null,
       isUpcoming,
+      canCancel:
+        row.status === "scheduled" &&
+        !row.subscription_id &&
+        isWithinCancellationWindow(row.service_date, row.time_slot),
     };
   });
 
@@ -1173,7 +1224,149 @@ export function getCustomerBookings(customerEmail: string) {
     bookings: all,
     upcoming,
     previous,
+    cancelled: getCancelledBookings(normalizedEmail),
   };
+}
+
+type CancelledBookingRow = {
+  id: string;
+  service_name: string;
+  price_cents: number;
+  service_date: string;
+  time_slot: BookingTime;
+  address: string;
+  cancelled_at: string;
+};
+
+function toCancelledBooking(row: CancelledBookingRow): CancelledBooking {
+  return {
+    id: row.id,
+    serviceName: row.service_name,
+    priceCents: row.price_cents,
+    date: row.service_date,
+    time: row.time_slot,
+    address: row.address,
+    cancelledAt: row.cancelled_at,
+  };
+}
+
+/** US-05: the customer's cancelled bookings, most recently cancelled first. */
+export function getCancelledBookings(customerEmail: string): CancelledBooking[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT id, service_name, price_cents, service_date, time_slot, address, cancelled_at
+       FROM cancelled_bookings
+       WHERE LOWER(email) = ?
+       ORDER BY cancelled_at DESC`,
+    )
+    .all(customerEmail.trim().toLowerCase()) as CancelledBookingRow[];
+  return rows.map(toCancelledBooking);
+}
+
+/**
+ * US-05: cancels one of the customer's own one-time bookings.
+ * - Allowed only while the visit is at least 24 hours away (Bangkok time).
+ * - Completed bookings and recurring-plan visits (use Skip) can't be cancelled.
+ * - Someone else's booking is reported as not found, so ids can't be probed.
+ * - Cancelling again (e.g. a retry) returns "already-cancelled", not an error.
+ * The booking is moved to `cancelled_bookings` in one transaction, which frees
+ * its arrival window for other customers and removes it from the cleaner's jobs.
+ */
+export function cancelCustomerBooking(
+  bookingId: string,
+  customerEmail: string,
+  nowOverride?: Date,
+): CancelBookingResult {
+  const email = customerEmail.trim().toLowerCase();
+  return withTransaction(() => {
+    // Read the clock after BEGIN IMMEDIATE has the lock, so waiting for
+    // another writer can never let a cancellation slip past the cutoff.
+    const now = nowOverride ?? new Date();
+    const database = getDatabase();
+    const booking = database
+      .prepare(
+        `SELECT id, name, email, service_id, service_name, price_cents, service_date,
+                time_slot, address, special_instructions, accepted_by_id,
+                accepted_by_name, created_at, status, subscription_id
+         FROM bookings WHERE id = ? AND LOWER(email) = ?`,
+      )
+      .get(bookingId, email) as
+      | {
+          id: string;
+          name: string;
+          email: string;
+          service_id: string;
+          service_name: string;
+          price_cents: number;
+          service_date: string;
+          time_slot: BookingTime;
+          address: string;
+          special_instructions: string | null;
+          accepted_by_id: string | null;
+          accepted_by_name: string | null;
+          created_at: string;
+          status: "scheduled" | "completed";
+          subscription_id: string | null;
+        }
+      | undefined;
+
+    if (!booking) {
+      // A retry after a lost response: report the earlier cancellation again.
+      const earlier = database
+        .prepare(
+          `SELECT id, service_name, price_cents, service_date, time_slot, address, cancelled_at
+           FROM cancelled_bookings WHERE id = ? AND LOWER(email) = ?`,
+        )
+        .get(bookingId, email) as CancelledBookingRow | undefined;
+      if (earlier) {
+        return {
+          status: "already-cancelled" as const,
+          booking: toCancelledBooking(earlier),
+          message: `This booking was already cancelled. You won't be charged.`,
+        };
+      }
+      return { status: "not-found" as const };
+    }
+    if (booking.status === "completed") return { status: "completed" as const };
+    if (booking.subscription_id) return { status: "recurring" as const };
+    if (!isWithinCancellationWindow(booking.service_date, booking.time_slot, now)) {
+      return { status: "too-late" as const };
+    }
+
+    const cancelledAt = now.toISOString();
+    database
+      .prepare(
+        `INSERT INTO cancelled_bookings (
+           id, name, email, service_id, service_name, price_cents, service_date,
+           time_slot, address, special_instructions, accepted_by_id,
+           accepted_by_name, created_at, cancelled_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        booking.id,
+        booking.name,
+        booking.email,
+        booking.service_id,
+        booking.service_name,
+        booking.price_cents,
+        booking.service_date,
+        booking.time_slot,
+        booking.address,
+        booking.special_instructions,
+        booking.accepted_by_id,
+        booking.accepted_by_name,
+        booking.created_at,
+        cancelledAt,
+      );
+    database.prepare("DELETE FROM bookings WHERE id = ?").run(booking.id);
+
+    const cancelled = toCancelledBooking({ ...booking, cancelled_at: cancelledAt });
+    return {
+      status: "cancelled" as const,
+      booking: cancelled,
+      message: `Your ${booking.service_name} on ${displayDayAndDate(booking.service_date)} at ${displaySlotTime(booking.time_slot)} has been cancelled. You won't be charged.`,
+    };
+  });
 }
 
 export function createCustomerSession(email: string, durationDays = 7): string {
@@ -2478,6 +2671,16 @@ export function resumeSubscription(
     }
     return { status: "ok", subscription: updated, message, dates: restored };
   });
+}
+
+/** "14:00" -> "2:00 PM", matching how the customer page shows arrival windows. */
+function displaySlotTime(time: string) {
+  const [hour, minute] = time.split(":").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(2000, 0, 1, hour, minute)));
 }
 
 function displayDayAndDate(date: string) {
