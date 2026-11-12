@@ -26,6 +26,7 @@ import {
   type Frequency,
   bangkokDateString,
 } from "./date-utils.ts";
+import { bookingBadge, type BookingBadge } from "./booking-badges.ts";
 
 export {
   addDaysToDateString,
@@ -86,6 +87,8 @@ export type CustomerBooking = {
   isUpcoming: boolean;
   /** US-05: true when the customer may cancel this booking right now. */
   canCancel?: boolean;
+  /** US-14: the status badge shown to the customer. */
+  badge?: BookingBadge;
   /** US-09: when the assigned cleaner checked in at the address. */
   arrivedAt?: string | null;
   /** US-09: minutes late the cleaner said they would be ("Running late"). */
@@ -417,6 +420,10 @@ function initDatabaseSchema(database: DatabaseSync) {
   `);
   database.exec(
     "CREATE INDEX IF NOT EXISTS idx_cancelled_bookings_email ON cancelled_bookings (LOWER(email), cancelled_at);",
+  );
+  // US-14: matches the customer's cancelled list (latest visit first).
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_cancelled_bookings_email_visit ON cancelled_bookings (LOWER(email), service_date DESC, time_slot DESC);",
   );
 
   // US-09: cleaner check-in, "running late" updates and no-show alerts.
@@ -1183,7 +1190,25 @@ export function submitBookingRating(
   }
 }
 
-export function getCustomerBookings(customerEmail: string) {
+/**
+ * The customer's bookings split into upcoming and past, plus cancelled ones.
+ * Both tables are read in one transaction (one snapshot), so a booking
+ * cancelled mid-request can't show up in both lists. `now` is for tests.
+ */
+export function getCustomerBookings(customerEmail: string, now: Date = new Date()) {
+  const database = getDatabase();
+  database.exec("BEGIN;");
+  try {
+    const result = readCustomerBookings(customerEmail, now);
+    database.exec("COMMIT;");
+    return result;
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+function readCustomerBookings(customerEmail: string, now: Date) {
   const database = getDatabase();
   const normalizedEmail = customerEmail.trim().toLowerCase();
 
@@ -1241,12 +1266,14 @@ export function getCustomerBookings(customerEmail: string) {
       review: string | null;
     }>;
 
-  const today = localDateString();
+  // Visits happen in Bangkok, so "today" is the Bangkok date (US-14).
+  const today = bangkokDateString(now);
 
   const all: CustomerBooking[] = rows.map((row) => {
     const isUpcoming = row.status === "scheduled" && row.service_date >= today;
     const statusLabel = row.status === "completed" ? "Completed" : "Scheduled";
     const isAccepted = Boolean(row.accepted_by_id || row.accepted_by_name);
+    const badge = bookingBadge(row.status, isAccepted, isUpcoming);
 
     return {
       id: row.id,
@@ -1275,12 +1302,13 @@ export function getCustomerBookings(customerEmail: string) {
       canCancel:
         row.status === "scheduled" &&
         !row.subscription_id &&
-        isWithinCancellationWindow(row.service_date, row.time_slot),
+        isWithinCancellationWindow(row.service_date, row.time_slot, now),
+      badge,
     };
   });
 
+  // US-14: upcoming soonest first (the query's order); past most recent first.
   const upcoming = all.filter((b) => b.isUpcoming);
-  // Sort previous descending (latest date first)
   const previous = all
     .filter((b) => !b.isUpcoming)
     .sort((a, b) => {
@@ -1319,14 +1347,14 @@ function toCancelledBooking(row: CancelledBookingRow): CancelledBooking {
   };
 }
 
-/** US-05: the customer's cancelled bookings, most recently cancelled first. */
+/** US-05: the customer's cancelled bookings, latest visit date first (US-14: same order as past bookings). */
 export function getCancelledBookings(customerEmail: string): CancelledBooking[] {
   const rows = getDatabase()
     .prepare(
       `SELECT id, service_name, price_cents, service_date, time_slot, address, cancelled_at
        FROM cancelled_bookings
        WHERE LOWER(email) = ?
-       ORDER BY cancelled_at DESC`,
+       ORDER BY service_date DESC, time_slot DESC`,
     )
     .all(customerEmail.trim().toLowerCase()) as CancelledBookingRow[];
   return rows.map(toCancelledBooking);
@@ -1356,7 +1384,7 @@ export function getCleanerCancelledJobs(cleanerId: string): CleanerCancelledJob[
        ORDER BY service_date ASC, time_slot ASC
        LIMIT ?`,
     )
-    .all(cleanerId, localDateString(), CLEANER_CANCELLED_JOBS_LIMIT) as Array<CancelledBookingRow & { name: string }>;
+    .all(cleanerId, bangkokDateString(), CLEANER_CANCELLED_JOBS_LIMIT) as Array<CancelledBookingRow & { name: string }>;
   return rows.map((row) => ({
     ...toCancelledBooking(row),
     customerName: row.name,
@@ -1812,7 +1840,7 @@ export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
       arrive_by: string | null;
     }>;
 
-  const today = localDateString();
+  const today = bangkokDateString();
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -1899,7 +1927,7 @@ export function getAvailableBookingRequests(): CustomerBooking[] {
         AND bookings.service_date >= ?
       ORDER BY bookings.service_date ASC, bookings.time_slot ASC`
     )
-    .all(localDateString()) as Array<{
+    .all(bangkokDateString()) as Array<{
       id: string;
       name: string;
       email: string;
@@ -1922,7 +1950,7 @@ export function getAvailableBookingRequests(): CustomerBooking[] {
       review: string | null;
     }>;
 
-  const today = localDateString();
+  const today = bangkokDateString();
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -1979,6 +2007,11 @@ export function acceptBookingRequest(
     if (existing.status === "completed") {
       database.exec("ROLLBACK;");
       return { success: false, error: "Cannot accept a completed booking." };
+    }
+
+    if (existing.service_date < bangkokDateString()) {
+      database.exec("ROLLBACK;");
+      return { success: false, error: "This visit's date has already passed." };
     }
 
     if (existing.accepted_by_id) {
@@ -2092,7 +2125,7 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
       review: string | null;
     }>;
 
-  const today = localDateString();
+  const today = bangkokDateString();
   return rows.map((row) => ({
     id: row.id,
     name: row.name,

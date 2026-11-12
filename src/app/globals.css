@@ -1171,6 +1171,17 @@ a {
   background: #b46b0a;
 }
 
+/* US-14: past bookings that never happened */
+.status-badge-missed {
+  background: #f1f3f7;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.status-badge-missed .status-indicator-dot {
+  background: var(--muted);
+}
+
 /* US-05: cancelling a booking */
 .status-badge-cancelled {
   background: #fbeeec;
