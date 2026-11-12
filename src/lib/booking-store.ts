@@ -26,6 +26,7 @@ import {
   type Frequency,
   bangkokDateString,
 } from "./date-utils.ts";
+import { bookingBadge, type BookingBadge } from "./booking-badges.ts";
 
 export {
   addDaysToDateString,
@@ -86,6 +87,8 @@ export type CustomerBooking = {
   isUpcoming: boolean;
   /** US-05: true when the customer may cancel this booking right now. */
   canCancel?: boolean;
+  /** US-14: the status badge shown to the customer. */
+  badge?: BookingBadge;
   /** US-09: when the assigned cleaner checked in at the address. */
   arrivedAt?: string | null;
   /** US-09: minutes late the cleaner said they would be ("Running late"). */
@@ -1241,12 +1244,14 @@ export function getCustomerBookings(customerEmail: string) {
       review: string | null;
     }>;
 
-  const today = localDateString();
+  // Visits happen in Bangkok, so "today" is the Bangkok date (US-14).
+  const today = bangkokDateString();
 
   const all: CustomerBooking[] = rows.map((row) => {
     const isUpcoming = row.status === "scheduled" && row.service_date >= today;
     const statusLabel = row.status === "completed" ? "Completed" : "Scheduled";
     const isAccepted = Boolean(row.accepted_by_id || row.accepted_by_name);
+    const badge = bookingBadge(row.status, isAccepted, isUpcoming);
 
     return {
       id: row.id,
@@ -1276,11 +1281,12 @@ export function getCustomerBookings(customerEmail: string) {
         row.status === "scheduled" &&
         !row.subscription_id &&
         isWithinCancellationWindow(row.service_date, row.time_slot),
+      badge,
     };
   });
 
+  // US-14: upcoming soonest first (the query's order); past most recent first.
   const upcoming = all.filter((b) => b.isUpcoming);
-  // Sort previous descending (latest date first)
   const previous = all
     .filter((b) => !b.isUpcoming)
     .sort((a, b) => {
@@ -1319,14 +1325,14 @@ function toCancelledBooking(row: CancelledBookingRow): CancelledBooking {
   };
 }
 
-/** US-05: the customer's cancelled bookings, most recently cancelled first. */
+/** US-05: the customer's cancelled bookings, latest visit date first (US-14: same order as past bookings). */
 export function getCancelledBookings(customerEmail: string): CancelledBooking[] {
   const rows = getDatabase()
     .prepare(
       `SELECT id, service_name, price_cents, service_date, time_slot, address, cancelled_at
        FROM cancelled_bookings
        WHERE LOWER(email) = ?
-       ORDER BY cancelled_at DESC`,
+       ORDER BY service_date DESC, time_slot DESC`,
     )
     .all(customerEmail.trim().toLowerCase()) as CancelledBookingRow[];
   return rows.map(toCancelledBooking);

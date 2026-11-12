@@ -9,6 +9,11 @@ import type {
   CustomerBooking,
 } from "@/lib/booking-store";
 import {
+  BOOKING_BADGE_CLASSES,
+  BOOKING_BADGE_LABELS,
+  bookingBadge,
+} from "@/lib/booking-badges";
+import {
   SERVICES,
   SPECIAL_INSTRUCTIONS_MAX_LENGTH,
   TIME_SLOTS,
@@ -504,7 +509,7 @@ export default function CustomerBookingsPage() {
                 className={`dashboard-tab${activeTab === "previous" ? " is-active" : ""}`}
                 onClick={() => setActiveTab("previous")}
               >
-                <span>Previous Cleanings</span>
+                <span>Past & Completed</span>
                 <span className="tab-badge">{previousBookings.length + cancelledBookings.length}</span>
               </button>
 
@@ -576,7 +581,7 @@ export default function CustomerBookingsPage() {
               <section id="panel-previous" role="tabpanel" className="tab-panel">
                 {previousBookings.length === 0 && cancelledBookings.length === 0 ? (
                   <EmptyBookingsView
-                    title="No previous cleanings found"
+                    title="No past or completed cleanings yet"
                     description="Your completed and past service records will appear here after cleanings are finished."
                     actionLabel="Schedule a cleaning"
                     onAction={() => setActiveTab("book-new")}
@@ -625,7 +630,7 @@ export default function CustomerBookingsPage() {
 
                     <div className="all-section-group" style={{ marginTop: "40px" }}>
                       <div className="section-divider-header">
-                        <h2>Previous Services ({previousBookings.length})</h2>
+                        <h2>Past & Completed ({previousBookings.length})</h2>
                       </div>
                       {previousBookings.length > 0 ? (
                         <div className="booking-card-list">
@@ -634,7 +639,7 @@ export default function CustomerBookingsPage() {
                           ))}
                         </div>
                       ) : (
-                        <p className="empty-subtext">No previous cleanings.</p>
+                        <p className="empty-subtext">No past or completed cleanings.</p>
                       )}
                     </div>
 
@@ -918,6 +923,7 @@ function BookingCard({
 }) {
   const isCompleted = booking.status === "completed";
   const isAccepted = Boolean(booking.acceptedByName || booking.isAccepted);
+  const badge = booking.badge ?? bookingBadge(booking.status, isAccepted, booking.isUpcoming);
   const [isRating, setIsRating] = useState(false);
   // US-05: cancelling asks for a second click, then calls the API.
   const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
@@ -962,22 +968,10 @@ function BookingCard({
         </div>
 
         <div className="status-wrap">
-          {isCompleted ? (
-            <span className="status-badge status-badge-completed">
-              <span className="status-indicator-dot" aria-hidden="true" />
-              Completed
-            </span>
-          ) : isAccepted ? (
-            <span className="status-badge status-badge-scheduled">
-              <span className="status-indicator-dot" aria-hidden="true" />
-              Confirmed & Accepted
-            </span>
-          ) : (
-            <span className="status-badge status-badge-pending">
-              <span className="status-indicator-dot" aria-hidden="true" />
-              Requested (Awaiting Cleaner)
-            </span>
-          )}
+          <span className={`status-badge ${BOOKING_BADGE_CLASSES[badge]}`}>
+            <span className="status-indicator-dot" aria-hidden="true" />
+            {BOOKING_BADGE_LABELS[badge]}
+          </span>
         </div>
       </div>
 
@@ -999,6 +993,8 @@ function BookingCard({
               <span style={{ color: "var(--green)" }}>{booking.acceptedByName} ✓</span>
             ) : isCompleted ? (
               booking.cleanerName
+            ) : badge === "no-cleaner" ? (
+              <span style={{ color: "var(--muted)" }}>None</span>
             ) : (
               <span style={{ color: "#b46b0a" }}>Searching for cleaner…</span>
             )}
@@ -1046,6 +1042,14 @@ function BookingCard({
                 Rate & review your cleaner ★
               </button>
             )
+          ) : badge === "not-completed" ? (
+            <span className="upcoming-hint">
+              This visit was never marked completed. Contact us if something went wrong.
+            </span>
+          ) : badge === "no-cleaner" ? (
+            <span className="upcoming-hint">
+              No cleaner took this request before the date passed.
+            </span>
           ) : isAccepted ? (
             <span className="upcoming-hint" style={{ color: "var(--green)" }}>
               Cleaner confirmed & scheduled
