@@ -10,13 +10,23 @@ import {
   markBookingCompleted,
   submitBookingRating,
   getCustomerBookings,
-  createCustomerSession,
+  createUser,
+  createUserSession,
+  getUserByEmail,
   resetDatabaseForTesting,
   getDatabase,
 } from "../src/lib/booking-store.ts";
 import { GET as handleBookingsGET } from "../src/app/api/bookings/route.ts";
 import { GET as handleCustomerBookingsGET } from "../src/app/api/customer/bookings/route.ts";
 import { seedTestUsers } from "./helpers/seed-test-users.mjs";
+
+/** Signs in as a customer account (created if needed) and returns a real session token. */
+function sessionFor(email) {
+  const user =
+    getUserByEmail(email) ||
+    createUser({ email, passwordHash: "test-only", name: email.split("@")[0], role: "customer" });
+  return createUserSession(user.id).token;
+}
 
 describe("US-02: View Cleaning Bookings", () => {
   let testDb;
@@ -80,7 +90,7 @@ describe("US-02: View Cleaning Bookings", () => {
     // Call API route with session cookie
     const req = new Request("http://localhost/api/bookings", {
       headers: {
-        cookie: "customer_session=alice@example.com",
+        cookie: `customer_session=${sessionFor("alice@example.com")}`,
       },
     });
     const res = await handleBookingsGET(req);
@@ -142,7 +152,7 @@ describe("US-02: View Cleaning Bookings", () => {
 
     const req = new Request("http://localhost/api/bookings", {
       headers: {
-        "x-customer-email": "david@example.com",
+        "x-session-token": sessionFor("david@example.com"),
       },
     });
     const res = await handleBookingsGET(req);
@@ -199,7 +209,7 @@ describe("US-02: View Cleaning Bookings", () => {
 
     // Request as Alice
     const aliceReq = new Request("http://localhost/api/bookings", {
-      headers: { "x-customer-email": "alice@example.com" },
+      headers: { "x-session-token": sessionFor("alice@example.com") },
     });
     const aliceRes = await handleBookingsGET(aliceReq);
     assert.strictEqual(aliceRes.status, 200);
@@ -211,7 +221,7 @@ describe("US-02: View Cleaning Bookings", () => {
 
     // Request as Bob
     const bobReq = new Request("http://localhost/api/bookings", {
-      headers: { "x-customer-email": "bob@example.com" },
+      headers: { "x-session-token": sessionFor("bob@example.com") },
     });
     const bobRes = await handleBookingsGET(bobReq);
     assert.strictEqual(bobRes.status, 200);
@@ -252,7 +262,7 @@ describe("US-02: View Cleaning Bookings", () => {
     const maliciousReq = new Request(
       "http://localhost/api/bookings?email=bob@example.com&customerId=bob@example.com",
       {
-        headers: { "x-customer-email": "alice@example.com" },
+        headers: { "x-session-token": sessionFor("alice@example.com") },
       },
     );
     const res = await handleBookingsGET(maliciousReq);
@@ -288,7 +298,7 @@ describe("US-02: View Cleaning Bookings", () => {
   // --------------------------------------------------------------------------
   // Scenario 6: Supports session token in database, Bearer auth, and cookies
   // --------------------------------------------------------------------------
-  test("Scenario 6: Authenticates via SQLite session token, Bearer auth, or cookie", async () => {
+  test("Scenario 6: Authenticates via SQLite session token, Bearer auth, or cookie, never a bare email", async () => {
     const today = new Date();
     const date = addDaysToDateString(localDateString(today), 3);
 
@@ -301,8 +311,8 @@ describe("US-02: View Cleaning Bookings", () => {
       address: "300 Peanut Way",
     });
 
-    // 1. Session token created in SQLite customer_sessions
-    const sessionToken = createCustomerSession("charlie@example.com");
+    // 1. Session token from the sessions table, sent in the legacy customer_session cookie
+    const sessionToken = sessionFor("charlie@example.com");
 
     const tokenReq = new Request("http://localhost/api/bookings", {
       headers: {
@@ -325,14 +335,14 @@ describe("US-02: View Cleaning Bookings", () => {
     const bearerData = await bearerRes.json();
     assert.strictEqual(bearerData.bookings.length, 1);
 
-    // 3. Direct Bearer email
+    // 3. A bare email is not a session token
     const directBearerReq = new Request("http://localhost/api/bookings", {
       headers: {
         authorization: "Bearer charlie@example.com",
       },
     });
     const directBearerRes = await handleBookingsGET(directBearerReq);
-    assert.strictEqual(directBearerRes.status, 200);
+    assert.strictEqual(directBearerRes.status, 401);
   });
 
   // --------------------------------------------------------------------------
@@ -340,7 +350,7 @@ describe("US-02: View Cleaning Bookings", () => {
   // --------------------------------------------------------------------------
   test("Scenario 7: Returns empty lists gracefully for customer with no existing bookings", async () => {
     const req = new Request("http://localhost/api/bookings", {
-      headers: { "x-customer-email": "newcustomer@example.com" },
+      headers: { "x-session-token": sessionFor("newcustomer@example.com") },
     });
     const res = await handleBookingsGET(req);
     assert.strictEqual(res.status, 200);
@@ -377,7 +387,7 @@ describe("US-02: View Cleaning Bookings", () => {
     // Authorized call
     const authRes = await handleCustomerBookingsGET(
       new Request("http://localhost/api/customer/bookings", {
-        headers: { "x-customer-email": "grace@example.com" },
+        headers: { "x-session-token": sessionFor("grace@example.com") },
       }),
     );
     assert.strictEqual(authRes.status, 200);

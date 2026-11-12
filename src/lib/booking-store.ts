@@ -1402,29 +1402,6 @@ export function cancelCustomerBooking(
   });
 }
 
-export function createCustomerSession(email: string, durationDays = 7): string {
-  const token = randomUUID();
-  const now = new Date();
-  const expires = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
-  getDatabase()
-    .prepare(
-      "INSERT INTO customer_sessions (token, email, created_at, expires_at) VALUES (?, ?, ?, ?)",
-    )
-    .run(token, email.trim().toLowerCase(), now.toISOString(), expires.toISOString());
-  return token;
-}
-
-export function getCustomerFromSessionToken(token: string): string | null {
-  if (!token || typeof token !== "string") return null;
-  const now = new Date().toISOString();
-  const row = getDatabase()
-    .prepare(
-      "SELECT email FROM customer_sessions WHERE token = ? AND expires_at > ?",
-    )
-    .get(token, now) as { email: string } | undefined;
-  return row ? row.email.toLowerCase() : null;
-}
-
 export function deleteCustomerSession(token: string): void {
   deleteSession(token);
 }
@@ -1693,29 +1670,6 @@ export function getSession(token: string): Session | null {
       role: sessionRow.role,
       createdAt: sessionRow.created_at,
       expiresAt: sessionRow.expires_at,
-    };
-  }
-
-  const custRow = database
-    .prepare("SELECT * FROM customer_sessions WHERE token = ? AND expires_at > ?")
-    .get(token, now) as
-    | {
-        token: string;
-        email: string;
-        created_at: string;
-        expires_at: string;
-      }
-    | undefined;
-
-  if (custRow) {
-    const user = getUserByEmail(custRow.email);
-    return {
-      token: custRow.token,
-      userId: user ? user.id : "legacy-customer",
-      email: custRow.email,
-      role: user ? user.role : "customer",
-      createdAt: custRow.created_at,
-      expiresAt: custRow.expires_at,
     };
   }
 
