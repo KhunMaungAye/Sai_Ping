@@ -1,8 +1,6 @@
 import { requireRole } from "../../../../lib/auth.ts";
 import {
-  getCleanerBookings,
-  getAvailableBookingRequests,
-  getCleanerAvailableDays,
+  getCleanerDashboardData,
   DEFAULT_CLEANER,
 } from "../../../../lib/booking-store.ts";
 
@@ -23,14 +21,14 @@ export async function GET(request: Request) {
       : (new URL(request.url).searchParams.get("cleanerId") || user.cleanerId || DEFAULT_CLEANER.id);
 
   try {
-    const bookings = getCleanerBookings(cleanerId);
-    const availableRequests = getAvailableBookingRequests();
-    const availableDays = getCleanerAvailableDays(cleanerId);
+    const { bookings, cancelledJobs, availableRequests, availableDays } =
+      getCleanerDashboardData(cleanerId);
     return Response.json(
       {
         cleanerId,
         cleanerName: user.name,
         bookings,
+        cancelledJobs,
         availableRequests,
         availableDays,
       },

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { CustomerBooking } from "@/lib/booking-store";
+import type { CleanerCancelledJob, CustomerBooking } from "@/lib/booking-store";
 import { signOut, useSession } from "@/lib/use-session";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -57,6 +57,7 @@ export default function CleanerDashboardPage() {
   const [activeTab, setActiveTab] = useState<
     "available" | "scheduled" | "completed" | "availability"
   >("available");
+  const [cancelledJobs, setCancelledJobs] = useState<CleanerCancelledJob[]>([]);
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
@@ -83,12 +84,19 @@ export default function CleanerDashboardPage() {
           router.replace("/unauthorized");
           return;
         }
+        if (!res.ok) {
+          // Keep the lists already on screen instead of blanking them.
+          showStatus("Could not refresh assigned jobs.", true);
+          return;
+        }
         const data = (await res.json()) as {
           bookings?: CustomerBooking[];
+          cancelledJobs?: CleanerCancelledJob[];
           availableRequests?: CustomerBooking[];
           availableDays?: number[];
         };
         setBookings(data.bookings ?? []);
+        setCancelledJobs(data.cancelledJobs ?? []);
         setAvailableRequests(data.availableRequests ?? []);
         setAvailableDays(data.availableDays ?? []);
         setDraftDays(data.availableDays ?? []);
@@ -463,7 +471,7 @@ export default function CleanerDashboardPage() {
           {/* TAB 2: Scheduled Jobs */}
           {activeTab === "scheduled" && (
             <div>
-              {scheduledJobs.length === 0 ? (
+              {scheduledJobs.length === 0 && cancelledJobs.length === 0 ? (
                 <div className="empty-bookings-card">
                   <div className="empty-icon-circle" aria-hidden="true">
                     ✨
@@ -538,6 +546,7 @@ export default function CleanerDashboardPage() {
                   ))}
                 </div>
               )}
+              <CancelledJobsList jobs={cancelledJobs} />
             </div>
           )}
 
@@ -675,6 +684,36 @@ function SpecialInstructions({ note }: { note: string | null | undefined }) {
       ) : (
         <p className="special-instructions-note is-empty">No special instructions provided.</p>
       )}
+    </div>
+  );
+}
+
+/** US-06: upcoming jobs the customer cancelled after this cleaner accepted them. */
+function CancelledJobsList({ jobs }: { jobs: CleanerCancelledJob[] }) {
+  if (jobs.length === 0) return null;
+  return (
+    <div className="cancelled-bookings-group">
+      <div className="section-divider-header">
+        <h2>Cancelled by the customer ({jobs.length})</h2>
+      </div>
+      <p className="field-hint">These jobs are off. You don&apos;t need to go.</p>
+      <ul className="cancelled-bookings-list">
+        {jobs.map((job) => (
+          <li key={job.id} className="cancelled-booking-row">
+            <div>
+              <strong>{job.serviceName}</strong>
+              <span>
+                {displayDate(job.date)} · {displayTime(job.time)} · {job.address}
+              </span>
+              <span>Customer: {job.customerName}</span>
+            </div>
+            <span className="status-badge status-badge-cancelled">
+              <span className="status-indicator-dot" aria-hidden="true" />
+              {job.statusLabel}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
