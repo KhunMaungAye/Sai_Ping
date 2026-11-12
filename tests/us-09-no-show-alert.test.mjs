@@ -1,13 +1,17 @@
 import test, { describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { addDaysToDateString, getDayOfWeekFromDateString, localDateString } from "../src/lib/date-utils.ts";
+import {
+  addDaysToDateString,
+  bangkokDateString,
+  getDayOfWeekFromDateString,
+  localDateString,
+} from "../src/lib/date-utils.ts";
 import { getServiceStartTime } from "../src/lib/services.ts";
 import {
   NO_SHOW_GRACE_MINUTES,
   REASSIGNED_ARRIVAL_MINUTES,
   acceptBookingRequest,
-  bangkokDateString,
   checkInForVisit,
   createBooking,
   createUserSession,
@@ -25,6 +29,7 @@ import { GET as noShowsGET } from "../src/app/api/admin/no-shows/route.ts";
 import { POST as resolvePOST } from "../src/app/api/admin/no-shows/[id]/resolve/route.ts";
 import { POST as checkInPOST } from "../src/app/api/cleaner/bookings/[id]/check-in/route.ts";
 import { POST as runningLatePOST } from "../src/app/api/cleaner/bookings/[id]/running-late/route.ts";
+import { POST as completePOST } from "../src/app/api/cleaner/bookings/[id]/complete/route.ts";
 import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 
 const MINUTE = 60 * 1000;
@@ -159,6 +164,29 @@ describe("US-09: Cleaner no-show alert", () => {
       assert.equal(alert.expectedBy, at(start, 30).toISOString());
     });
 
+    test("only one late report, and the expected time never moves earlier", () => {
+      const { booking, start } = acceptedJob();
+      const id = cleaner().cleanerId;
+      assert.equal(reportRunningLate(booking.id, id, 45, at(start, -5)).status, "ok");
+      const again = reportRunningLate(booking.id, id, 15, at(start, 0));
+      assert.equal(again.status, "already-reported");
+      assert.equal(again.lateMinutes, 45);
+      assert.equal(detectNoShows(at(start, 45 + NO_SHOW_GRACE_MINUTES - 1)), 0);
+    });
+
+    test("a replacement's late report counts from the time they were given", () => {
+      const { booking, start } = acceptedJob();
+      detectNoShows(at(start, 20));
+      const [alert] = getNoShowAlerts().open;
+      const t = at(start, 30);
+      const second = cleaner(CLEANER2);
+      resolveNoShowAlert(alert.id, { type: "reassign", cleanerId: second.cleanerId }, "Admin", t);
+
+      const late = reportRunningLate(booking.id, second.cleanerId, 15, at(t, 10));
+      assert.equal(late.status, "ok");
+      assert.equal(late.expectedBy, at(t, REASSIGNED_ARRIVAL_MINUTES + 15).toISOString());
+    });
+
     test("a late update is refused once the cleaner is already a no-show", () => {
       const { booking, start } = acceptedJob();
       const id = cleaner().cleanerId;
@@ -166,6 +194,11 @@ describe("US-09: Cleaner no-show alert", () => {
       assert.equal(reportRunningLate(booking.id, id, 20, at(start, 0)).status, "invalid");
       assert.equal(reportRunningLate(booking.id, cleaner(CLEANER2).cleanerId, 15, at(start, 0)).status, "forbidden");
       assert.equal(reportRunningLate("missing", id, 15, at(start, 0)).status, "not-found");
+    });
+
+    test("check-in is closed after the day of the job", () => {
+      const { booking, start } = acceptedJob();
+      assert.equal(checkInForVisit(booking.id, cleaner().cleanerId, at(start, 24 * 60)).status, "past-day");
     });
 
     test("check-in opens an hour before arrival; a late check-in closes the alert", () => {
@@ -261,13 +294,55 @@ describe("US-09: Cleaner no-show alert", () => {
       assert.equal(resolveNoShowAlert("missing", { type: "resolve" }, "Admin").status, "not-found");
     });
 
-    test("a job completed in the meantime can't be reassigned", () => {
+    test("completing the job closes its open alert", () => {
       const { booking, start } = acceptedJob();
       detectNoShows(at(start, 20));
+      assert.equal(getNoShowAlerts().open.length, 1);
       markBookingCompleted(booking.id, cleaner().cleanerId);
+      assert.equal(getNoShowAlerts().open.length, 0);
+      assert.equal(getNoShowAlerts().resolved[0].resolution, "job-completed");
+    });
+
+    test("a cleaner given the job back gets a new alert if they miss it again", () => {
+      const { booking, start } = acceptedJob();
+      const first = cleaner();
+      const second = cleaner(CLEANER2);
+
+      detectNoShows(at(start, 20));
+      let [alert] = getNoShowAlerts().open;
+      const t1 = at(start, 25);
+      resolveNoShowAlert(alert.id, { type: "reassign", cleanerId: second.cleanerId }, "Admin", t1);
+
+      detectNoShows(at(t1, REASSIGNED_ARRIVAL_MINUTES + NO_SHOW_GRACE_MINUTES));
+      [alert] = getNoShowAlerts().open;
+      assert.equal(alert.cleanerId, second.cleanerId);
+      const t2 = at(t1, 80);
+      resolveNoShowAlert(alert.id, { type: "reassign", cleanerId: first.cleanerId }, "Admin", t2);
+
+      assert.equal(detectNoShows(at(t2, REASSIGNED_ARRIVAL_MINUTES + NO_SHOW_GRACE_MINUTES)), 1);
+      [alert] = getNoShowAlerts().open;
+      assert.equal(alert.cleanerId, first.cleanerId);
+      assert.equal(alert.bookingId, booking.id);
+    });
+
+    test("the cleaner who lost the job can't complete it afterwards", async () => {
+      const { booking, start } = acceptedJob();
+      detectNoShows(at(start, 20));
       const [alert] = getNoShowAlerts().open;
-      const result = resolveNoShowAlert(alert.id, { type: "reassign", cleanerId: cleaner(CLEANER2).cleanerId }, "Admin");
-      assert.equal(result.status, "booking-completed");
+      const second = cleaner(CLEANER2);
+      resolveNoShowAlert(alert.id, { type: "reassign", cleanerId: second.cleanerId }, "Admin");
+
+      assert.equal(
+        markBookingCompleted(booking.id, cleaner().cleanerId, { requireAcceptedBy: cleaner().cleanerId }).status,
+        "not-assigned",
+      );
+      const url = `http://localhost/api/cleaner/bookings/${booking.id}/complete`;
+      assert.equal((await post(completePOST, url, booking.id, CLEANER)).status, 403);
+
+      // Completion always records the currently assigned cleaner.
+      assert.equal(markBookingCompleted(booking.id, cleaner().cleanerId).status, "completed");
+      const row = getDatabase().prepare("SELECT cleaner_id FROM bookings WHERE id = ?").get(booking.id);
+      assert.equal(row.cleaner_id, second.cleanerId);
     });
   });
 
@@ -344,15 +419,15 @@ describe("US-09: Cleaner no-show alert", () => {
       assert.equal((await late.json()).lateMinutes, 45);
     });
 
-    test("POST check-in succeeds once the job has started", async () => {
+    test("POST check-in is refused for a job on an earlier day", async () => {
       const booking = overdueToday();
       getDatabase()
         .prepare("UPDATE bookings SET service_date = ? WHERE id = ?")
         .run(addDaysToDateString(bangkokDateString(), -1), booking.id);
       const url = `http://localhost/api/cleaner/bookings/${booking.id}/check-in`;
       const res = await post(checkInPOST, url, booking.id, CLEANER);
-      assert.equal(res.status, 200);
-      assert.ok((await res.json()).arrivedAt);
+      assert.equal(res.status, 409);
+      assert.match((await res.json()).error, /only open on the day/);
     });
   });
 });

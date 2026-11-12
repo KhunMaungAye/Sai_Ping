@@ -24,6 +24,7 @@ import {
   normalizeDayName,
   type DayOfWeekName,
   type Frequency,
+  bangkokDateString,
 } from "./date-utils.ts";
 
 export {
@@ -442,12 +443,14 @@ function initDatabaseSchema(database: DatabaseSync) {
       expected_by TEXT NOT NULL,
       detected_at TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
-      resolution TEXT CHECK (resolution IN ('reassigned', 'cleaner-arrived', 'resolved')),
+      resolution TEXT CHECK (resolution IN ('reassigned', 'cleaner-arrived', 'job-completed', 'resolved')),
       resolved_at TEXT,
       resolved_by TEXT,
       reassigned_to_id TEXT,
       reassigned_to_name TEXT,
-      UNIQUE (booking_id, cleaner_id)
+      -- One alert per missed arrival: a cleaner given the job again (with a
+      -- new expected time) gets a new alert if they miss it again.
+      UNIQUE (booking_id, cleaner_id, expected_by)
     );
   `);
   database.exec(
@@ -1073,17 +1076,33 @@ export function getBookingRatingDetails(
   };
 }
 
-export function markBookingCompleted(id: string, cleanerId: string) {
+/**
+ * Marks a booking completed. With `requireAcceptedBy`, only succeeds if that
+ * cleaner is still the one assigned when the write happens (US-09: the admin
+ * may reassign the job between the cleaner's check and this update). The
+ * booking's cleaner is the currently assigned one when there is one. Any open
+ * US-09 no-show alert for it is closed as "job-completed".
+ */
+export function markBookingCompleted(
+  id: string,
+  cleanerId: string,
+  options: { requireAcceptedBy?: string } = {},
+) {
   const database = getDatabase();
   database.exec("BEGIN IMMEDIATE;");
   try {
     const booking = database
-      .prepare("SELECT id FROM bookings WHERE id = ?")
-      .get(id);
+      .prepare("SELECT id, accepted_by_id FROM bookings WHERE id = ?")
+      .get(id) as { id: string; accepted_by_id: string | null } | undefined;
     if (!booking) {
       database.exec("ROLLBACK;");
       return { status: "not-found" as const };
     }
+    if (options.requireAcceptedBy && booking.accepted_by_id !== options.requireAcceptedBy) {
+      database.exec("ROLLBACK;");
+      return { status: "not-assigned" as const };
+    }
+    if (booking.accepted_by_id) cleanerId = booking.accepted_by_id;
 
     const cleaner = database
       .prepare("SELECT id FROM cleaners WHERE id = ?")
@@ -1098,6 +1117,13 @@ export function markBookingCompleted(id: string, cleanerId: string) {
         "UPDATE bookings SET status = 'completed', cleaner_id = ? WHERE id = ?",
       )
       .run(cleanerId, id);
+    database
+      .prepare(
+        `UPDATE no_show_alerts
+         SET status = 'resolved', resolution = 'job-completed', resolved_at = ?, resolved_by = ?
+         WHERE booking_id = ? AND status = 'open'`,
+      )
+      .run(new Date().toISOString(), cleanerId, id);
     database.exec("COMMIT;");
     return { status: "completed" as const };
   } catch (error) {
@@ -2912,11 +2938,6 @@ export const REASSIGNED_ARRIVAL_MINUTES = 60;
 
 const MINUTE = 60 * 1000;
 
-/** Today's date in Bangkok (UTC+7), where all visits happen. */
-export function bangkokDateString(now: Date = new Date()): string {
-  return new Date(now.getTime() + 7 * 60 * MINUTE).toISOString().slice(0, 10);
-}
-
 /** The moment the cleaner becomes a no-show: expected time + grace period. */
 export function noShowDeadline(
   date: string,
@@ -2950,6 +2971,8 @@ export type VisitUpdateResult =
   | { status: "already-arrived"; arrivedAt: string }
   | { status: "too-early"; opensAt: string }
   | { status: "too-late" }
+  | { status: "past-day" }
+  | { status: "already-reported"; lateMinutes: number }
   | { status: "invalid" };
 
 /** Loads a visit for a cleaner action; "not-found"/"forbidden" if it isn't theirs. */
@@ -2993,6 +3016,10 @@ export function checkInForVisit(
       database.exec("ROLLBACK;");
       return { status: "already-arrived", arrivedAt: row.arrived_at };
     }
+    if (bangkokDateString(now) > row.service_date) {
+      database.exec("ROLLBACK;");
+      return { status: "past-day" };
+    }
     const opensAt = new Date(
       getServiceStartTime(row.service_date, row.time_slot).getTime() -
         CHECK_IN_OPENS_MINUTES * MINUTE,
@@ -3021,8 +3048,10 @@ export function checkInForVisit(
 
 /**
  * US-09: "Running late" — the cleaner says they'll arrive 15, 30 or 45 minutes
- * after the arrival time. Allowed until they would already be a no-show, so a
- * late update can't cancel an alert that has already been raised.
+ * after the time they are currently expected (the arrival time, or, for a job
+ * the admin reassigned to them, the time they were given). One report per
+ * cleaner per job, so the expected time only ever moves later. Allowed until
+ * they would already be a no-show, so it can't cancel a raised alert.
  */
 export function reportRunningLate(
   bookingId: string,
@@ -3050,14 +3079,19 @@ export function reportRunningLate(
       database.exec("ROLLBACK;");
       return { status: "already-arrived", arrivedAt: row.arrived_at };
     }
+    if (row.late_minutes) {
+      database.exec("ROLLBACK;");
+      return { status: "already-reported", lateMinutes: row.late_minutes };
+    }
     if (now >= noShowDeadline(row.service_date, row.time_slot, row.arrive_by)) {
       database.exec("ROLLBACK;");
       return { status: "too-late" };
     }
 
-    const expectedBy = new Date(
-      getServiceStartTime(row.service_date, row.time_slot).getTime() + minutes * MINUTE,
-    ).toISOString();
+    const currentlyExpected = row.arrive_by
+      ? new Date(row.arrive_by)
+      : getServiceStartTime(row.service_date, row.time_slot);
+    const expectedBy = new Date(currentlyExpected.getTime() + minutes * MINUTE).toISOString();
     database
       .prepare("UPDATE bookings SET late_minutes = ?, arrive_by = ? WHERE id = ?")
       .run(minutes, expectedBy, bookingId);
@@ -3134,7 +3168,7 @@ export type NoShowAlert = {
   lateMinutes: number | null;
   detectedAt: string;
   status: "open" | "resolved";
-  resolution: "reassigned" | "cleaner-arrived" | "resolved" | null;
+  resolution: "reassigned" | "cleaner-arrived" | "job-completed" | "resolved" | null;
   resolvedAt: string | null;
   resolvedBy: string | null;
   reassignedToName: string | null;

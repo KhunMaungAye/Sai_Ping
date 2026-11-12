@@ -56,7 +56,17 @@ export async function POST(request: Request, { params }: RouteContext) {
   const assignedCleanerId = assignment?.acceptedById || DEFAULT_CLEANER.id;
 
   try {
-    const result = markBookingCompleted(id, assignedCleanerId);
+    const result = markBookingCompleted(
+      id,
+      assignedCleanerId,
+      user.role === "cleaner" ? { requireAcceptedBy: cleanerId } : {},
+    );
+    if (result.status === "not-assigned") {
+      return Response.json(
+        { error: "This job has been reassigned to another cleaner." },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     if (result.status === "not-found") {
       return Response.json(
         { error: "Booking not found." },

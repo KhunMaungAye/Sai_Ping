@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CleanerCancelledJob, CustomerBooking } from "@/lib/booking-store";
+import { bangkokDateString } from "@/lib/date-utils";
 import { getServiceStartTime } from "@/lib/services";
 import { signOut, useSession } from "@/lib/use-session";
 
@@ -727,11 +728,6 @@ function CancelledJobsList({ jobs }: { jobs: CleanerCancelledJob[] }) {
   );
 }
 
-/** Today's date in Bangkok (UTC+7), where all visits happen. */
-function bangkokToday() {
-  return new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
 function clockTime(iso: string) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
@@ -755,7 +751,8 @@ function VisitControls({
   const [busy, setBusy] = useState<"check-in" | "late" | null>(null);
   const [lateMinutes, setLateMinutes] = useState(15);
 
-  if (job.date > bangkokToday()) return null;
+  // Only on the day of the job (Bangkok time).
+  if (job.date !== bangkokDateString()) return null;
 
   if (job.arrivedAt) {
     return (
@@ -806,26 +803,30 @@ function VisitControls({
         >
           {busy === "check-in" ? "Checking in…" : "I've arrived"}
         </button>
-        <label className="visit-late">
-          <select
-            aria-label="How many minutes late"
-            value={lateMinutes}
-            onChange={(event) => setLateMinutes(Number(event.target.value))}
-            disabled={busy !== null}
-          >
-            <option value={15}>15 min</option>
-            <option value={30}>30 min</option>
-            <option value={45}>45 min</option>
-          </select>
-        </label>
-        <button
-          type="button"
-          className="visit-late-button"
-          disabled={busy !== null}
-          onClick={() => send("late")}
-        >
-          {busy === "late" ? "Sending…" : "Running late"}
-        </button>
+        {job.lateMinutes ? null : (
+          <>
+            <label className="visit-late">
+              <select
+                aria-label="How many minutes late"
+                value={lateMinutes}
+                onChange={(event) => setLateMinutes(Number(event.target.value))}
+                disabled={busy !== null}
+              >
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={45}>45 min</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="visit-late-button"
+              disabled={busy !== null}
+              onClick={() => send("late")}
+            >
+              {busy === "late" ? "Sending…" : "Running late"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

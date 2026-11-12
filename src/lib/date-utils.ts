@@ -122,3 +122,11 @@ export function isBookableDate(value: string) {
     value >= localDateString()
   );
 }
+
+/** Sai Ping works in Bangkok (UTC+7, no daylight saving). */
+const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+/** US-09: today's date (YYYY-MM-DD) in Bangkok, whatever the server's or browser's time zone. */
+export function bangkokDateString(now: Date = new Date()): string {
+  return new Date(now.getTime() + BANGKOK_OFFSET_MS).toISOString().slice(0, 10);
+}

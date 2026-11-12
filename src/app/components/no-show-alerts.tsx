@@ -155,9 +155,13 @@ export function NoShowAlertsPanel({
                       ? `Reassigned to ${alert.reassignedToName}`
                       : alert.resolution === "cleaner-arrived"
                         ? "Cleaner checked in late"
-                        : "Marked resolved"}
+                        : alert.resolution === "job-completed"
+                          ? "Job marked completed"
+                          : "Marked resolved"}
                     {alert.resolvedAt ? ` at ${clockTime(alert.resolvedAt)}` : ""}
-                    {alert.resolvedBy && alert.resolution !== "cleaner-arrived" ? ` by ${alert.resolvedBy}` : ""}
+                    {alert.resolvedBy && (alert.resolution === "reassigned" || alert.resolution === "resolved")
+                      ? ` by ${alert.resolvedBy}`
+                      : ""}
                   </span>
                 </div>
               </li>

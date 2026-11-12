@@ -37,6 +37,18 @@ export function visitResponse(result: VisitUpdateResult, okMessage: string) {
         },
         { status: 409, headers: NO_STORE },
       );
+    case "past-day":
+      return Response.json(
+        { error: "Check-in is only open on the day of the job." },
+        { status: 409, headers: NO_STORE },
+      );
+    case "already-reported":
+      return Response.json(
+        {
+          error: `You already said you'd be ${result.lateMinutes} minutes late. Check in as soon as you arrive.`,
+        },
+        { status: 409, headers: NO_STORE },
+      );
     case "invalid":
       return Response.json(
         { error: "Choose 15, 30 or 45 minutes." },
