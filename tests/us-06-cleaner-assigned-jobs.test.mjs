@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { addDaysToDateString, localDateString } from "../src/lib/date-utils.ts";
 import {
+  CLEANER_CANCELLED_JOBS_LIMIT,
   acceptBookingRequest,
   cancelCustomerBooking,
   createBooking,
   createUserSession,
+  getCleanerDashboardData,
   getDatabase,
   getUserByEmail,
   markBookingCompleted,
@@ -18,13 +20,22 @@ import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 const CLEANER = "cleaner@saiping.com"; // cleaner-001, works every day
 const OTHER_CLEANER = "cleaner2@saiping.com"; // cleaner-002
 
+function isWeekend(date) {
+  return [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay());
+}
+
 /** A future date (days from today) that falls on a weekday, so both cleaners work it. */
 function futureWeekday(minDays) {
   let date = addDaysToDateString(localDateString(new Date()), minDays);
-  while ([0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay())) {
-    date = addDaysToDateString(date, 1);
-  }
+  while (isWeekend(date)) date = addDaysToDateString(date, 1);
   return date;
+}
+
+/** The first weekday after `date`. */
+function nextWeekday(date) {
+  let next = addDaysToDateString(date, 1);
+  while (isWeekend(next)) next = addDaysToDateString(next, 1);
+  return next;
 }
 
 function book({ date, time = "09:00", email = "bob@example.com", name = "Bob Client", ...rest }) {
@@ -168,6 +179,50 @@ describe("US-06: View assigned cleaning jobs", () => {
     const data = await (await getJobs()).json();
     assert.deepEqual(data.bookings, []);
     assert.deepEqual(data.cancelledJobs, []);
+  });
+
+  test("only the soonest cancelled jobs are listed, up to the cap", async () => {
+    // Each job gets its own slot: 09:00 and 14:00 on consecutive weekdays.
+    const total = CLEANER_CANCELLED_JOBS_LIMIT + 5;
+    const firstDate = futureWeekday(3);
+    let date = firstDate;
+    for (let made = 0; made < total; made += 1) {
+      const time = made % 2 === 0 ? "09:00" : "14:00";
+      const booking = book({ date, time });
+      accept(booking.id);
+      assert.equal(cancelCustomerBooking(booking.id, "bob@example.com").status, "cancelled");
+      if (time === "14:00") date = nextWeekday(date);
+    }
+
+    const { cancelledJobs } = await (await getJobs()).json();
+    assert.equal(cancelledJobs.length, CLEANER_CANCELLED_JOBS_LIMIT);
+    const keys = cancelledJobs.map((job) => `${job.date} ${job.time}`);
+    assert.deepEqual(keys, [...keys].sort(), "soonest first");
+    assert.equal(cancelledJobs[0].date, firstDate);
+  });
+
+  test("dashboard lists are read in one transaction that is always closed", () => {
+    const booking = book({ date: futureWeekday(3) });
+    accept(booking.id);
+    const cleanerId = getUserByEmail(CLEANER).cleanerId;
+
+    const data = getCleanerDashboardData(cleanerId);
+    assert.deepEqual(data.bookings.map((job) => job.id), [booking.id]);
+    assert.deepEqual(data.cancelledJobs, []);
+    // A new transaction can start, so the read transaction was committed.
+    getDatabase().exec("BEGIN IMMEDIATE; COMMIT;");
+
+    // If a read fails, the transaction is rolled back and the error is passed on.
+    getDatabase().exec("DROP TABLE cancelled_bookings;");
+    assert.throws(() => getCleanerDashboardData(cleanerId));
+    getDatabase().exec("BEGIN IMMEDIATE; COMMIT;");
+  });
+
+  test("the API returns 500 (not empty lists) when a read fails", async () => {
+    getDatabase().exec("DROP TABLE cancelled_bookings;");
+    const res = await getJobs();
+    assert.equal(res.status, 500);
+    assert.ok((await res.json()).error);
   });
 
   test("401 when signed out, 403 for a customer", async () => {

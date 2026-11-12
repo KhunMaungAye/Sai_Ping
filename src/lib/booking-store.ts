@@ -1270,6 +1270,9 @@ export type CleanerCancelledJob = CancelledBooking & {
   statusLabel: string;
 };
 
+/** US-06: at most this many cancelled jobs are listed (the soonest ones). */
+export const CLEANER_CANCELLED_JOBS_LIMIT = 50;
+
 /**
  * US-06: upcoming jobs this cleaner had accepted that the customer then
  * cancelled (US-05 moves them out of `bookings`), soonest first, so the
@@ -1281,9 +1284,10 @@ export function getCleanerCancelledJobs(cleanerId: string): CleanerCancelledJob[
       `SELECT id, name, service_name, price_cents, service_date, time_slot, address, cancelled_at
        FROM cancelled_bookings
        WHERE accepted_by_id = ? AND service_date >= ?
-       ORDER BY service_date ASC, time_slot ASC`,
+       ORDER BY service_date ASC, time_slot ASC
+       LIMIT ?`,
     )
-    .all(cleanerId, localDateString()) as Array<CancelledBookingRow & { name: string }>;
+    .all(cleanerId, localDateString(), CLEANER_CANCELLED_JOBS_LIMIT) as Array<CancelledBookingRow & { name: string }>;
   return rows.map((row) => ({
     ...toCancelledBooking(row),
     customerName: row.name,
@@ -1805,6 +1809,29 @@ export function getCleanerBookings(cleanerId: string): CustomerBooking[] {
     review: row.review ?? null,
     isUpcoming: row.status === "scheduled" && row.service_date >= today,
   }));
+}
+
+/**
+ * US-06: everything the cleaner dashboard shows, read inside one transaction
+ * so all lists come from the same database snapshot. A cancellation committed
+ * mid-request can then never put a job in both `bookings` and `cancelledJobs`.
+ */
+export function getCleanerDashboardData(cleanerId: string) {
+  const database = getDatabase();
+  database.exec("BEGIN;");
+  try {
+    const data = {
+      bookings: getCleanerBookings(cleanerId),
+      cancelledJobs: getCleanerCancelledJobs(cleanerId),
+      availableRequests: getAvailableBookingRequests(),
+      availableDays: getCleanerAvailableDays(cleanerId),
+    };
+    database.exec("COMMIT;");
+    return data;
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
 }
 
 export function getAvailableBookingRequests(): CustomerBooking[] {

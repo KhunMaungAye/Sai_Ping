@@ -84,6 +84,11 @@ export default function CleanerDashboardPage() {
           router.replace("/unauthorized");
           return;
         }
+        if (!res.ok) {
+          // Keep the lists already on screen instead of blanking them.
+          showStatus("Could not refresh assigned jobs.", true);
+          return;
+        }
         const data = (await res.json()) as {
           bookings?: CustomerBooking[];
           cancelledJobs?: CleanerCancelledJob[];
