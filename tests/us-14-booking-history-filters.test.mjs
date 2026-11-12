@@ -9,6 +9,8 @@ import {
   createBooking,
   createUser,
   createUserSession,
+  getAvailableBookingRequests,
+  getCustomerBookings,
   getDatabase,
   getUserByEmail,
   markBookingCompleted,
@@ -155,6 +157,53 @@ describe("US-14: booking history status filters", () => {
     const data = await history();
     assert.deepEqual(data.upcoming.map((b) => b.id), [mine]);
     assert.deepEqual(data.previous, []);
+  });
+
+  test("'today' is the Bangkok date, even when the server's date is different", () => {
+    // 20:00 UTC on day D is already 03:00 on day D+1 in Bangkok. D is in the
+    // future, so a check that used the real clock or the server's own date
+    // would wrongly keep this booking under Upcoming.
+    const d = day(10);
+    const now = new Date(`${d}T20:00:00Z`);
+    const id = book({ date: d });
+    const previousTz = process.env.TZ;
+    process.env.TZ = "UTC";
+    try {
+      const result = getCustomerBookings(CUSTOMER, now);
+      assert.deepEqual(result.upcoming, []);
+      assert.equal(result.previous[0].id, id);
+      assert.equal(result.previous[0].badge, "no-cleaner");
+      // One hour earlier it's still day D in Bangkok (02:00): upcoming.
+      const earlier = getCustomerBookings(CUSTOMER, new Date(`${d}T16:00:00Z`));
+      assert.equal(earlier.upcoming[0].id, id);
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
+  test("bookings and cancellations are read in one transaction that is always closed", () => {
+    book({ date: day(3) });
+    getCustomerBookings(CUSTOMER);
+    getDatabase().exec("BEGIN IMMEDIATE; COMMIT;"); // the read transaction was committed
+
+    getDatabase().exec("DROP TABLE cancelled_bookings;");
+    assert.throws(() => getCustomerBookings(CUSTOMER));
+    getDatabase().exec("BEGIN IMMEDIATE; COMMIT;"); // ...and rolled back on failure
+  });
+
+  test("cleaners can't see or accept a request whose Bangkok date has passed", () => {
+    const yesterday = book({ date: day(-1) });
+    const tomorrow = book({ date: day(1) });
+    const open = getAvailableBookingRequests().map((b) => b.id);
+    assert.ok(open.includes(tomorrow));
+    assert.ok(!open.includes(yesterday));
+
+    const cleaner = getUserByEmail("cleaner@saiping.com");
+    const result = acceptBookingRequest(yesterday, cleaner.cleanerId, cleaner.name);
+    assert.equal(result.success, false);
+    assert.match(result.error, /already passed/);
+    assert.equal(acceptBookingRequest(tomorrow, cleaner.cleanerId, cleaner.name).success, true);
   });
 
   test("401 when signed out", async () => {
