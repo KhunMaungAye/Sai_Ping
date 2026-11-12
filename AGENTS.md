@@ -87,7 +87,8 @@ tests/                            node:test suites; tests/helpers/seed-test-user
 ### Auth (`src/lib/auth.ts`)
 - Sessions are rows in the `sessions` table, sent in the HttpOnly `session_token` cookie (7 days). `sessionCookieHeaders()` builds the cookies for both login and register.
 - Every route handler that needs auth calls `requireRole(request, [...roles])`: 401 when signed out, 403 for the wrong role. **Never trust a role sent by the client.**
-- `getAuthenticatedUser` keeps some legacy fallbacks (Bearer token, `x-session-token`, raw email, `x-customer-email`) that older tests rely on. Don't remove them without updating `tests/`.
+- Identity comes **only from a real, unexpired session token** (the `session_token`/`customer_session` cookie, `Authorization: Bearer <token>`, or `x-session-token`) that maps to an existing, active user row. A bare email is never accepted as identity, in any header or cookie: an email-only request gets 401. Don't add email-based fallbacks back.
+- `requireSessionRole` (used by the US-05 cancel route) is an alias of `requireRole`.
 - A cleaner's booking id is `user.cleanerId || user.id`.
 
 ### API routes (`src/app/api/**/route.ts`)
@@ -101,7 +102,7 @@ tests/                            node:test suites; tests/helpers/seed-test-user
 
 ### Tests (`tests/*.test.mjs`)
 - Each test creates `new DatabaseSync(":memory:")`, installs it with `resetDatabaseForTesting(db)`, then calls `seedTestUsers()` for the demo accounts: `customer@saiping.com` / `CustomerPassword123!`, `cleaner@saiping.com` / `CleanerPassword123!` (every day), `cleaner2@saiping.com` / `Cleaner2Password123!` (Mon–Fri).
-- Build requests as `new Request(url, { headers: { cookie: "session_token=..." } })` with a token from `createUserSession(userId)`. Dynamic handlers take `{ params: Promise.resolve({ id }) }`.
+- Build requests as `new Request(url, { headers: { cookie: "session_token=..." } })` with a token from `createUserSession(userId)`. Never send an email as the token or via `x-customer-email`; give a test customer a real account (`createUser`) first. Dynamic handlers take `{ params: Promise.resolve({ id }) }`.
 - Add tests for every new endpoint or rule, covering the happy path, edge cases and errors.
 
 ## Gotchas

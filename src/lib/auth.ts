@@ -1,6 +1,5 @@
 import bcrypt from "bcryptjs";
 import {
-  getCustomerFromSessionToken,
   getSession,
   getUserByEmail,
   getUserById,
@@ -84,98 +83,30 @@ export function extractSessionToken(request: Request): string | null {
 
 /**
  * Server-side user authorization check.
- * Strictly derives the user's identity and assigned role from a server-verified session
- * or trusted database record.
- * NEVER trusts client-supplied query parameters, body parameters, or client headers for role!
+ * Identity comes ONLY from a real, unexpired session token (Bearer header,
+ * `x-session-token` header, or a session cookie) that maps to an existing,
+ * active user row. A bare email is never accepted as identity, and the role is
+ * always read from the database, never from the client.
  */
 export function getAuthenticatedUser(request: Request): User | null {
   const token = extractSessionToken(request);
+  if (!token) return null;
 
-  if (token) {
-    const session = getSession(token);
-    if (session) {
-      const user = getUserById(session.userId) || getUserByEmail(session.email);
-      if (user) {
-        if (user.status === "suspended") return null;
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          cleanerId: user.cleanerId,
-          status: user.status,
-          createdAt: user.createdAt,
-        };
-      }
+  const session = getSession(token);
+  if (!session) return null;
 
-      // If user row not in DB yet (e.g. legacy session), return customer role
-      return {
-        id: session.userId,
-        email: session.email,
-        name: session.email.split("@")[0],
-        role: session.role || "customer",
-        cleanerId: null,
-        status: "active",
-        createdAt: session.createdAt,
-      };
-    }
+  const user = getUserById(session.userId) || getUserByEmail(session.email);
+  if (!user || user.status === "suspended") return null;
 
-    // Direct email cookie/bearer check (for legacy US-02 test compatibility)
-    if (isValidEmail(token)) {
-      const user = getUserByEmail(token);
-      if (user) {
-        if (user.status === "suspended") return null;
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          cleanerId: user.cleanerId,
-          status: user.status,
-          createdAt: user.createdAt,
-        };
-      }
-      return {
-        id: "legacy-customer-" + token.toLowerCase(),
-        email: token.toLowerCase(),
-        name: token.split("@")[0],
-        role: "customer",
-        cleanerId: null,
-        status: "active",
-        createdAt: new Date().toISOString(),
-      };
-    }
-  }
-
-  // Header fallback for US-02 automated tests: x-customer-email
-  const headerEmail = request.headers.get("x-customer-email");
-  if (headerEmail && isValidEmail(headerEmail)) {
-    const normalized = headerEmail.trim().toLowerCase();
-    const user = getUserByEmail(normalized);
-    if (user) {
-      if (user.status === "suspended") return null;
-      return {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        cleanerId: user.cleanerId,
-        status: user.status,
-        createdAt: user.createdAt,
-      };
-    }
-    return {
-      id: "virtual-customer",
-      email: normalized,
-      name: normalized.split("@")[0],
-      role: "customer",
-      cleanerId: null,
-      status: "active",
-      createdAt: new Date().toISOString(),
-    };
-  }
-
-  return null;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    cleanerId: user.cleanerId,
+    status: user.status,
+    createdAt: user.createdAt,
+  };
 }
 
 /**
@@ -202,21 +133,10 @@ export function requireRole(
 }
 
 /**
- * Like `requireRole`, but accepts ONLY a real, unexpired session token. The
- * legacy fallbacks in `getAuthenticatedUser` (a bare email as the token, or the
- * `x-customer-email` header) are ignored, so nobody can act as a customer just
- * by knowing their email. Use it for routes that change data.
+ * Kept for the US-05 cancel route. `requireRole` now accepts only real session
+ * tokens too, so this is the same check.
  */
-export function requireSessionRole(
-  request: Request,
-  allowedRoles: UserRole[],
-): { user: User } | { error: string; status: number } {
-  const token = extractSessionToken(request);
-  if (!token || !getSession(token)) {
-    return { error: "Unauthorized. Please sign in.", status: 401 };
-  }
-  return requireRole(request, allowedRoles);
-}
+export const requireSessionRole = requireRole;
 
 /**
  * Returns role-specific default dashboard destination.
@@ -268,61 +188,6 @@ export function validateRedirect(
   }
 
   return trimmed;
-}
-
-/**
- * Server-side customer authorization check.
- * Maintained for 100% backward compatibility with US-02 and customer bookings endpoints.
- */
-export function getAuthenticatedCustomer(
-  request: Request,
-): { email: string } | null {
-  // 1. Explicit header auth check (e.g. simulated auth proxy, test header, or service-to-service)
-  const headerEmail = request.headers.get("x-customer-email");
-  if (headerEmail && isValidEmail(headerEmail)) {
-    return { email: headerEmail.trim().toLowerCase() };
-  }
-
-  // 2. Authorization header: Bearer <token_or_email>
-  const authHeader = request.headers.get("authorization");
-  if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
-    const token = authHeader.slice(7).trim();
-    if (token) {
-      const session = getSession(token);
-      if (session) return { email: session.email };
-
-      const dbEmail = getCustomerFromSessionToken(token);
-      if (dbEmail) return { email: dbEmail };
-
-      if (isValidEmail(token)) {
-        return { email: token.toLowerCase() };
-      }
-    }
-  }
-
-  // 3. Cookie session check: session_token, customer_session, session, customer_email, auth_token
-  const cookieHeader = request.headers.get("cookie");
-  const cookies = parseCookies(cookieHeader);
-  const sessionToken =
-    cookies["session_token"] ||
-    cookies["customer_session"] ||
-    cookies["session"] ||
-    cookies["customer_email"] ||
-    cookies["auth_token"];
-
-  if (sessionToken) {
-    const session = getSession(sessionToken);
-    if (session) return { email: session.email };
-
-    const dbEmail = getCustomerFromSessionToken(sessionToken);
-    if (dbEmail) return { email: dbEmail };
-
-    if (isValidEmail(sessionToken)) {
-      return { email: sessionToken.toLowerCase() };
-    }
-  }
-
-  return null;
 }
 
 /**
