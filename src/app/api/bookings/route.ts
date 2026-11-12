@@ -42,9 +42,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { bookings, upcoming, previous, customerEmail } = getCustomerBookings(
-      user.email,
-    );
+    const { bookings, upcoming, previous, cancelled, customerEmail } =
+      getCustomerBookings(user.email);
 
     return Response.json(
       {
@@ -52,6 +51,7 @@ export async function GET(request: Request) {
         bookings,
         upcoming,
         previous,
+        cancelled,
       },
       {
         status: 200,

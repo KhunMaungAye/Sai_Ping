@@ -1171,6 +1171,133 @@ a {
   background: #b46b0a;
 }
 
+/* US-05: cancelling a booking */
+.status-badge-cancelled {
+  background: #fbeeec;
+  color: var(--coral);
+  border: 1px solid #f0c9c2;
+}
+
+.status-badge-cancelled .status-indicator-dot {
+  background: var(--coral);
+}
+
+.booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 14px;
+}
+
+.cancel-booking-link {
+  color: var(--coral);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  min-height: 32px;
+}
+
+.cancel-booking-link:hover {
+  color: #7d2a1d;
+}
+
+.cancel-booking-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cancel-booking-confirm {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #f0c9c2;
+  border-radius: 8px;
+  background: #fdf6f5;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.cancel-booking-confirm .form-error {
+  margin-top: 10px;
+}
+
+.cancel-booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+
+.cancel-booking-confirm-button {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 6px;
+  background: var(--coral);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cancel-booking-confirm-button:hover:not(:disabled) {
+  background: #7d2a1d;
+}
+
+.cancel-booking-confirm-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.cancelled-bookings-group {
+  margin-top: 40px;
+}
+
+.cancelled-bookings-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cancelled-booking-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.cancelled-booking-row > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cancelled-booking-row > div > strong {
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.cancelled-booking-row > div > span {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .cancelled-booking-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .status-badge-accepted {
   background: #eef6fc;
   color: #1971c2;
