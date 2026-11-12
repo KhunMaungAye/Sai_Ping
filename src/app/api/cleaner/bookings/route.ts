@@ -1,6 +1,7 @@
 import { requireRole } from "../../../../lib/auth.ts";
 import {
   getCleanerBookings,
+  getCleanerCancelledJobs,
   getAvailableBookingRequests,
   getCleanerAvailableDays,
   DEFAULT_CLEANER,
@@ -24,6 +25,7 @@ export async function GET(request: Request) {
 
   try {
     const bookings = getCleanerBookings(cleanerId);
+    const cancelledJobs = getCleanerCancelledJobs(cleanerId);
     const availableRequests = getAvailableBookingRequests();
     const availableDays = getCleanerAvailableDays(cleanerId);
     return Response.json(
@@ -31,6 +33,7 @@ export async function GET(request: Request) {
         cleanerId,
         cleanerName: user.name,
         bookings,
+        cancelledJobs,
         availableRequests,
         availableDays,
       },

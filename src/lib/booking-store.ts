@@ -1263,6 +1263,35 @@ export function getCancelledBookings(customerEmail: string): CancelledBooking[] 
   return rows.map(toCancelledBooking);
 }
 
+/** US-06: an upcoming job the cleaner had accepted that the customer cancelled. */
+export type CleanerCancelledJob = CancelledBooking & {
+  customerName: string;
+  status: "cancelled";
+  statusLabel: string;
+};
+
+/**
+ * US-06: upcoming jobs this cleaner had accepted that the customer then
+ * cancelled (US-05 moves them out of `bookings`), soonest first, so the
+ * cleaner can see the job is off instead of it silently disappearing.
+ */
+export function getCleanerCancelledJobs(cleanerId: string): CleanerCancelledJob[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT id, name, service_name, price_cents, service_date, time_slot, address, cancelled_at
+       FROM cancelled_bookings
+       WHERE accepted_by_id = ? AND service_date >= ?
+       ORDER BY service_date ASC, time_slot ASC`,
+    )
+    .all(cleanerId, localDateString()) as Array<CancelledBookingRow & { name: string }>;
+  return rows.map((row) => ({
+    ...toCancelledBooking(row),
+    customerName: row.name,
+    status: "cancelled" as const,
+    statusLabel: "Cancelled by customer",
+  }));
+}
+
 /**
  * US-05: cancels one of the customer's own one-time bookings.
  * - Allowed only while the visit is at least 24 hours away (Bangkok time).
