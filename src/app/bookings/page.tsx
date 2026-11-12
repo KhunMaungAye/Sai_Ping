@@ -505,7 +505,7 @@ export default function CustomerBookingsPage() {
                 onClick={() => setActiveTab("previous")}
               >
                 <span>Previous Cleanings</span>
-                <span className="tab-badge">{previousBookings.length}</span>
+                <span className="tab-badge">{previousBookings.length + cancelledBookings.length}</span>
               </button>
 
               <button
@@ -517,7 +517,7 @@ export default function CustomerBookingsPage() {
                 onClick={() => setActiveTab("all")}
               >
                 <span>All Bookings</span>
-                <span className="tab-badge">{allBookings.length}</span>
+                <span className="tab-badge">{allBookings.length + cancelledBookings.length}</span>
               </button>
 
               <button

@@ -1,4 +1,4 @@
-import { requireRole } from "../../../../../lib/auth.ts";
+import { requireSessionRole } from "../../../../../lib/auth.ts";
 import { cancelCustomerBooking } from "../../../../../lib/booking-store.ts";
 import { CANCELLATION_NOTICE_HOURS } from "../../../../../lib/services.ts";
 
@@ -11,7 +11,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * 24 hours before the visit. The rule is checked here, not only in the page.
  */
 export async function POST(request: Request, { params }: RouteContext) {
-  const auth = requireRole(request, ["customer"]);
+  // Only a real signed-in session counts here (no email-only fallbacks).
+  const auth = requireSessionRole(request, ["customer"]);
   if ("error" in auth) {
     return Response.json({ error: auth.error }, { status: auth.status, headers: NO_STORE });
   }
@@ -48,12 +49,14 @@ export async function POST(request: Request, { params }: RouteContext) {
           { status: 409, headers: NO_STORE },
         );
       default:
+        // "already-cancelled" (a retry after a lost response) is a success too.
         return Response.json(
           { message: result.message, booking: result.booking },
           { status: 200, headers: NO_STORE },
         );
     }
-  } catch {
+  } catch (error) {
+    console.error(`[US-05] cancelling booking ${id} failed`, error);
     return Response.json(
       { error: "Your booking could not be cancelled. Please try again." },
       { status: 500, headers: NO_STORE },

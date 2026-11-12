@@ -197,11 +197,15 @@ describe("US-05 Cancel cleaning booking", () => {
       assert.equal(getCustomerBookings(CUSTOMER).bookings.length, 1);
     });
 
-    test("cancelling twice: the second attempt finds nothing", () => {
+    test("cancelling twice: the retry reports the earlier cancellation, no duplicate", () => {
       const booking = book();
       assert.equal(cancelCustomerBooking(booking.id, CUSTOMER).status, "cancelled");
-      assert.equal(cancelCustomerBooking(booking.id, CUSTOMER).status, "not-found");
+      const retry = cancelCustomerBooking(booking.id, CUSTOMER);
+      assert.equal(retry.status, "already-cancelled");
+      assert.equal(retry.booking.id, booking.id);
       assert.equal(getCustomerBookings(CUSTOMER).cancelled.length, 1);
+      // Another customer still can't learn about it.
+      assert.equal(cancelCustomerBooking(booking.id, "someone@example.com").status, "not-found");
     });
 
     test("canCancel is true far ahead and false for a visit today", () => {
@@ -237,6 +241,27 @@ describe("US-05 Cancel cleaning booking", () => {
       assert.equal(data.upcoming.length, 0);
       assert.equal(data.cancelled.length, 1);
       assert.equal(data.cancelled[0].id, booking.id);
+    });
+
+    test("a retried request gets 200 again, not an error", async () => {
+      const booking = book();
+      assert.equal((await cancelRequest(booking.id)).status, 200);
+      const retry = await cancelRequest(booking.id);
+      assert.equal(retry.status, 200);
+      assert.match((await retry.json()).message, /already cancelled/);
+    });
+
+    test("401 when only an email is sent instead of a session (no email-only sign-in)", async () => {
+      const booking = book();
+      const asEmail = (headers) =>
+        cancelPOST(
+          new Request(`http://localhost/api/bookings/${booking.id}/cancel`, { method: "POST", headers }),
+          { params: Promise.resolve({ id: booking.id }) },
+        );
+      assert.equal((await asEmail({ "x-customer-email": CUSTOMER })).status, 401);
+      assert.equal((await asEmail({ authorization: `Bearer ${CUSTOMER}` })).status, 401);
+      assert.equal((await asEmail({ cookie: `session_token=${CUSTOMER}` })).status, 401);
+      assert.equal(getCustomerBookings(CUSTOMER).bookings.length, 1);
     });
 
     test("401 when signed out", async () => {

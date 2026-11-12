@@ -99,6 +99,7 @@ export type CancelledBooking = {
 
 export type CancelBookingResult =
   | { status: "cancelled"; booking: CancelledBooking; message: string }
+  | { status: "already-cancelled"; booking: CancelledBooking; message: string }
   | { status: "not-found" }
   | { status: "completed" }
   | { status: "recurring" }
@@ -406,6 +407,9 @@ function initDatabaseSchema(database: DatabaseSync) {
       cancelled_at TEXT NOT NULL
     );
   `);
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_cancelled_bookings_email ON cancelled_bookings (LOWER(email), cancelled_at);",
+  );
 }
 
 export function getDatabase(customPath?: string) {
@@ -1264,16 +1268,20 @@ export function getCancelledBookings(customerEmail: string): CancelledBooking[] 
  * - Allowed only while the visit is at least 24 hours away (Bangkok time).
  * - Completed bookings and recurring-plan visits (use Skip) can't be cancelled.
  * - Someone else's booking is reported as not found, so ids can't be probed.
+ * - Cancelling again (e.g. a retry) returns "already-cancelled", not an error.
  * The booking is moved to `cancelled_bookings` in one transaction, which frees
  * its arrival window for other customers and removes it from the cleaner's jobs.
  */
 export function cancelCustomerBooking(
   bookingId: string,
   customerEmail: string,
-  now: Date = new Date(),
+  nowOverride?: Date,
 ): CancelBookingResult {
   const email = customerEmail.trim().toLowerCase();
   return withTransaction(() => {
+    // Read the clock after BEGIN IMMEDIATE has the lock, so waiting for
+    // another writer can never let a cancellation slip past the cutoff.
+    const now = nowOverride ?? new Date();
     const database = getDatabase();
     const booking = database
       .prepare(
@@ -1302,7 +1310,23 @@ export function cancelCustomerBooking(
         }
       | undefined;
 
-    if (!booking) return { status: "not-found" as const };
+    if (!booking) {
+      // A retry after a lost response: report the earlier cancellation again.
+      const earlier = database
+        .prepare(
+          `SELECT id, service_name, price_cents, service_date, time_slot, address, cancelled_at
+           FROM cancelled_bookings WHERE id = ? AND LOWER(email) = ?`,
+        )
+        .get(bookingId, email) as CancelledBookingRow | undefined;
+      if (earlier) {
+        return {
+          status: "already-cancelled" as const,
+          booking: toCancelledBooking(earlier),
+          message: `This booking was already cancelled. You won't be charged.`,
+        };
+      }
+      return { status: "not-found" as const };
+    }
     if (booking.status === "completed") return { status: "completed" as const };
     if (booking.subscription_id) return { status: "recurring" as const };
     if (!isWithinCancellationWindow(booking.service_date, booking.time_slot, now)) {

@@ -202,6 +202,23 @@ export function requireRole(
 }
 
 /**
+ * Like `requireRole`, but accepts ONLY a real, unexpired session token. The
+ * legacy fallbacks in `getAuthenticatedUser` (a bare email as the token, or the
+ * `x-customer-email` header) are ignored, so nobody can act as a customer just
+ * by knowing their email. Use it for routes that change data.
+ */
+export function requireSessionRole(
+  request: Request,
+  allowedRoles: UserRole[],
+): { user: User } | { error: string; status: number } {
+  const token = extractSessionToken(request);
+  if (!token || !getSession(token)) {
+    return { error: "Unauthorized. Please sign in.", status: 401 };
+  }
+  return requireRole(request, allowedRoles);
+}
+
+/**
  * Returns role-specific default dashboard destination.
  */
 export function getRoleDashboardPath(role: UserRole): string {
