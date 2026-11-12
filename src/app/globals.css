@@ -3258,3 +3258,103 @@ html {
     padding: 6px 8px;
   }
 }
+
+
+/* US-09: cleaner check-in / running late, admin no-show alerts */
+.visit-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sky);
+}
+.visit-panel-done {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--green-dark);
+  font-weight: 700;
+  font-size: 14px;
+}
+.visit-panel-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.visit-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.visit-panel-actions .visit-check-in {
+  width: auto;
+  margin: 0;
+  min-height: 40px;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+.visit-late select,
+.visit-late-button,
+.no-show-actions select,
+.no-show-resolve-button {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.visit-late-button,
+.no-show-resolve-button {
+  cursor: pointer;
+}
+.visit-late-button {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.visit-late-button:disabled,
+.no-show-resolve-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.no-show-card {
+  border-left: 4px solid var(--coral);
+}
+.no-show-alert-badge {
+  color: var(--coral);
+  background: #fdecea;
+  border-color: #f3c3bb;
+}
+.no-show-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.no-show-actions .confirm-button {
+  width: auto;
+  margin: 0;
+  min-height: 40px;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+.tab-badge.is-alert {
+  background: var(--coral);
+  color: #fff;
+}
+@media (max-width: 480px) {
+  .visit-panel-actions > *,
+  .no-show-actions > * {
+    flex: 1 1 100%;
+  }
+  .visit-panel-actions .visit-check-in,
+  .no-show-actions .confirm-button {
+    width: 100%;
+  }
+}

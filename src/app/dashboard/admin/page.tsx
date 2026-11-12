@@ -23,6 +23,7 @@ import {
   sortCleanerSummaries,
 } from "@/lib/cleaner-ratings";
 import { signOut, useSession } from "@/lib/use-session";
+import { NoShowAlertsPanel, NoShowBanner, useNoShowAlerts } from "@/app/components/no-show-alerts";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -63,8 +64,9 @@ export default function AdminDashboardPage() {
   const authStatus = session.status === "ready" ? "authenticated" : "loading";
 
   const [activeTab, setActiveTab] = useState<
-    "bookings" | "cleaners" | "customers" | "reviews" | "users"
+    "bookings" | "no-shows" | "cleaners" | "customers" | "reviews" | "users"
   >("bookings");
+  const noShows = useNoShowAlerts(authStatus === "authenticated");
   const [cleaners, setCleaners] = useState<AdminCleanerSummary[]>([]);
   const [cleanerSort, setCleanerSort] = useState<CleanerRatingSort>("name");
   const [customers, setCustomers] = useState<AdminCustomerSummary[]>([]);
@@ -277,6 +279,8 @@ export default function AdminDashboardPage() {
           </div>
         ) : null}
 
+        <NoShowBanner count={noShows.open.length} onView={() => setActiveTab("no-shows")} />
+
         {/* Tab Controls */}
         <nav className="dashboard-tabs" role="tablist" style={{ marginTop: "28px" }}>
           <button
@@ -288,6 +292,19 @@ export default function AdminDashboardPage() {
           >
             <span>All Customer Bookings</span>
             <span className="tab-badge">{bookings.length}</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "no-shows"}
+            className={`dashboard-tab${activeTab === "no-shows" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("no-shows")}
+          >
+            <span>No-shows</span>
+            <span className={`tab-badge${noShows.open.length > 0 ? " is-alert" : ""}`}>
+              {noShows.open.length}
+            </span>
           </button>
 
           <button
@@ -635,6 +652,18 @@ export default function AdminDashboardPage() {
         ) : null}
 
         {/* Panel 2: User Account Management */}
+        {activeTab === "no-shows" ? (
+          <NoShowAlertsPanel
+            open={noShows.open}
+            resolved={noShows.resolved}
+            error={noShows.error}
+            onChanged={() => {
+              noShows.reload();
+              setRefresh((v) => v + 1);
+            }}
+          />
+        ) : null}
+
         {activeTab === "users" ? (
           <section className="tab-panel">
             <div className="table-responsive-wrapper">
