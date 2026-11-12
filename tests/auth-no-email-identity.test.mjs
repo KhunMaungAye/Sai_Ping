@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { addDaysToDateString, localDateString } from "../src/lib/date-utils.ts";
 import {
   createBooking,
+  createUser,
   createUserSession,
   getBookingRatingDetails,
   getDatabase,
@@ -94,6 +95,35 @@ describe("Auth: a bare email is never accepted as identity", () => {
       assert.equal(res.status, 401, `expected 401 for ${JSON.stringify(headers)}`);
     }
     assert.equal(getBookingRatingDetails(booking.id).rating ?? null, null);
+  });
+
+  test("a session never carries over to a new account registered with the same email", async () => {
+    const original = createUser({ email: "dana@example.com", passwordHash: "x", name: "Dana", role: "customer" });
+    const oldToken = createUserSession(original.id).token;
+    const list = (token) =>
+      bookingsGET(new Request("http://localhost/api/bookings", { headers: { cookie: `session_token=${token}` } }));
+    assert.equal((await list(oldToken)).status, 200);
+
+    // The account is removed and someone else registers the same email. (The
+    // sessions foreign key normally blocks this delete; switch it off to prove
+    // the token still can't jump to the new account if a row ever goes away.)
+    getDatabase().exec("PRAGMA foreign_keys = OFF;");
+    getDatabase().prepare("DELETE FROM users WHERE id = ?").run(original.id);
+    getDatabase().exec("PRAGMA foreign_keys = ON;");
+    const newcomer = createUser({ email: "dana@example.com", passwordHash: "y", name: "New Dana", role: "customer" });
+
+    assert.equal((await list(oldToken)).status, 401);
+    assert.equal((await list(createUserSession(newcomer.id).token)).status, 200);
+  });
+
+  test("a token found only in the legacy customer_sessions table is not accepted", async () => {
+    getDatabase()
+      .prepare("INSERT INTO customer_sessions (token, email, created_at, expires_at) VALUES (?, ?, ?, ?)")
+      .run("legacy-token", CUSTOMER, new Date().toISOString(), new Date(Date.now() + 86400000).toISOString());
+    const res = await bookingsGET(
+      new Request("http://localhost/api/bookings", { headers: { cookie: "customer_session=legacy-token" } }),
+    );
+    assert.equal(res.status, 401);
   });
 
   test("the same requests succeed with a real session token", async () => {

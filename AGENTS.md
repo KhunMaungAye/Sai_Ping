@@ -87,7 +87,7 @@ tests/                            node:test suites; tests/helpers/seed-test-user
 ### Auth (`src/lib/auth.ts`)
 - Sessions are rows in the `sessions` table, sent in the HttpOnly `session_token` cookie (7 days). `sessionCookieHeaders()` builds the cookies for both login and register.
 - Every route handler that needs auth calls `requireRole(request, [...roles])`: 401 when signed out, 403 for the wrong role. **Never trust a role sent by the client.**
-- Identity comes **only from a real, unexpired session token** (the `session_token`/`customer_session` cookie, `Authorization: Bearer <token>`, or `x-session-token`) that maps to an existing, active user row. A bare email is never accepted as identity, in any header or cookie: an email-only request gets 401. Don't add email-based fallbacks back.
+- Identity comes **only from a real, unexpired session token** (the `session_token`/`customer_session` cookie, `Authorization: Bearer <token>`, or `x-session-token`) in the `sessions` table that maps to an existing, active user **by user id** (never by email, so a later account with the same email can't inherit an old session). A bare email is never accepted as identity, in any header or cookie: an email-only request gets 401. Don't add email-based fallbacks back.
 - `requireSessionRole` (used by the US-05 cancel route) is an alias of `requireRole`.
 - A cleaner's booking id is `user.cleanerId || user.id`.
 

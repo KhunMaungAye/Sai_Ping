@@ -1,7 +1,6 @@
 import bcrypt from "bcryptjs";
 import {
   getSession,
-  getUserByEmail,
   getUserById,
   type User,
   type UserRole,
@@ -95,7 +94,9 @@ export function getAuthenticatedUser(request: Request): User | null {
   const session = getSession(token);
   if (!session) return null;
 
-  const user = getUserById(session.userId) || getUserByEmail(session.email);
+  // Only the account the session was issued to. Never look it up by email: a
+  // new account registered later with the same email must not inherit it.
+  const user = getUserById(session.userId);
   if (!user || user.status === "suspended") return null;
 
   return {

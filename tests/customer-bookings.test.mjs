@@ -10,7 +10,6 @@ import {
   markBookingCompleted,
   submitBookingRating,
   getCustomerBookings,
-  createCustomerSession,
   createUser,
   createUserSession,
   getUserByEmail,
@@ -312,9 +311,8 @@ describe("US-02: View Cleaning Bookings", () => {
       address: "300 Peanut Way",
     });
 
-    // 1. Session token created in SQLite customer_sessions (for an existing account)
-    sessionFor("charlie@example.com");
-    const sessionToken = createCustomerSession("charlie@example.com");
+    // 1. Session token from the sessions table, sent in the legacy customer_session cookie
+    const sessionToken = sessionFor("charlie@example.com");
 
     const tokenReq = new Request("http://localhost/api/bookings", {
       headers: {
