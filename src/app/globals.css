@@ -2623,19 +2623,11 @@ html {
   background: var(--navy);
   color: rgba(255, 255, 255, 0.8);
 }
-.footer-inner {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 24px;
-}
-.footer-inner .brand-logo {
+.footer-grid .brand-logo {
   padding: 8px 12px;
   border-radius: 12px;
   background: white;
-}
-.footer-inner p {
-  margin: 12px 0 0;
+  display: inline-flex;
 }
 .footer-links {
   display: flex;
@@ -2655,6 +2647,137 @@ html {
   padding: 20px 24px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.15);
   font-size: 13px;
+}
+
+/* Lively footer: brand/contact, quick links, fake "follow us", join CTA */
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  gap: 32px;
+}
+.footer-col-brand .footer-tagline {
+  margin: 14px 0 2px;
+  max-width: 320px;
+}
+.footer-company {
+  margin: 2px 0 10px;
+  font-weight: 700;
+  color: white;
+}
+.footer-contact-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.footer-heading {
+  margin: 0 0 14px;
+  color: var(--sunny);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.footer-grid .footer-links {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+/* Fake social proof: plain text rows, deliberately not links. */
+.footer-social-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  cursor: default;
+}
+.footer-social-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.social-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+  font-family: Georgia, serif;
+}
+.social-glyph-facebook {
+  background: #1877f2;
+}
+.social-glyph-instagram {
+  background: radial-gradient(circle at 30% 110%, #fdf497, #fd5949 45%, #d6249f 70%, #285aeb);
+}
+.social-glyph-tiktok {
+  background: #111;
+}
+.social-glyph-line {
+  background: #06c755;
+}
+
+.footer-cta-text {
+  margin: 0 0 14px;
+  font-size: 13px;
+  max-width: 220px;
+}
+.footer-join-button {
+  padding: 10px 18px;
+  border-radius: 6px;
+  background: var(--sunny);
+  color: var(--navy);
+  font-weight: 700;
+  font-size: 13px;
+}
+.footer-join-button:hover {
+  background: var(--sunny-dark);
+}
+
+.back-to-top-button {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--brand-blue);
+  color: white;
+  font-size: 18px;
+  box-shadow: 0 6px 18px rgba(11, 29, 107, 0.35);
+  z-index: 40;
+}
+.back-to-top-button:hover {
+  background: var(--navy);
+}
+
+@media (max-width: 900px) {
+  .footer-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .back-to-top-button {
+    width: 40px;
+    height: 40px;
+    right: 14px;
+    bottom: 14px;
+  }
 }
 
 /* Auth panel (pop-up and /login) */

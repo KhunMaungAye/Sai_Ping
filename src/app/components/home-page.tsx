@@ -319,28 +319,127 @@ export default function HomePage() {
       </section>
 
       <footer className="site-footer">
-        <div className="section-inner footer-inner">
-          <div>
+        <div className="section-inner footer-grid">
+          <div className="footer-col footer-col-brand">
             <BrandLogo height={40} />
-            <p>Sparkling homes, zero stress — across Bangkok.</p>
+            <p className="footer-tagline">Sparkling homes, zero stress — across Bangkok.</p>
+            <p className="footer-company">Sai Ping Cleaning Co., Ltd.</p>
+            <ul className="footer-contact-list">
+              <li>88 Silom Rd, Bang Rak, Bangkok 10500</li>
+              <li>+66 2 123 4500</li>
+              <li>hello@saiping.co.th</li>
+            </ul>
           </div>
-          <nav className="footer-links" aria-label="Footer">
-            {NAV_LINKS.map((link) => (
-              <a key={link.href} href={link.href}>
-                {link.label}
-              </a>
-            ))}
-            {signedIn ? null : (
-              <button type="button" className="text-button" onClick={() => openAuth()}>
-                Login
-              </button>
-            )}
-          </nav>
+
+          <div className="footer-col">
+            <h3 className="footer-heading">Quick Links</h3>
+            <nav className="footer-links" aria-label="Footer">
+              {NAV_LINKS.map((link) => (
+                <a key={link.href} href={link.href}>
+                  {link.label}
+                </a>
+              ))}
+              {signedIn ? null : (
+                <button type="button" className="text-button" onClick={() => openAuth()}>
+                  Login
+                </button>
+              )}
+            </nav>
+          </div>
+
+          <div className="footer-col">
+            <h3 className="footer-heading">Follow Us</h3>
+            {/* For visual warmth only — Sai Ping has no real social accounts yet,
+                so these are shown as plain text, never as links. */}
+            <ul className="footer-social-list" aria-hidden="true">
+              <li className="footer-social-row">
+                <FacebookGlyph />
+                <span>facebook.com/saipingcleaning</span>
+              </li>
+              <li className="footer-social-row">
+                <InstagramGlyph />
+                <span>@saipingcleaning</span>
+              </li>
+              <li className="footer-social-row">
+                <TikTokGlyph />
+                <span>@saipingcleaning</span>
+              </li>
+              <li className="footer-social-row">
+                <LineGlyph />
+                <span>LINE: @saiping</span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="footer-col footer-col-cta">
+            <h3 className="footer-heading">Join Our Team</h3>
+            <p className="footer-cta-text">
+              Reliable, flexible work cleaning homes across Bangkok.
+            </p>
+            <button
+              type="button"
+              className="footer-join-button"
+              onClick={() => openAuth("cleaner", "sign-up")}
+            >
+              Become a cleaner
+            </button>
+          </div>
         </div>
         <p className="footer-copy">© 2026 Sai Ping Cleaning Co., Bangkok.</p>
       </footer>
 
+      <button
+        type="button"
+        className="back-to-top-button"
+        aria-label="Back to top"
+        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      >
+        ↑
+      </button>
+
       <AuthModal open={auth.open} initialRole={auth.role} initialMode={auth.mode} onClose={closeAuth} />
     </main>
+  );
+}
+
+/* Simple, decorative glyphs for the footer's fake "Follow Us" list — not real
+   logos, just enough shape to read as Facebook/Instagram/TikTok/LINE. */
+function FacebookGlyph() {
+  return (
+    <span className="social-glyph social-glyph-facebook" aria-hidden="true">
+      f
+    </span>
+  );
+}
+
+function InstagramGlyph() {
+  return (
+    <span className="social-glyph social-glyph-instagram" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="3" y="3" width="18" height="18" rx="5" />
+        <circle cx="12" cy="12" r="4" />
+        <circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none" />
+      </svg>
+    </span>
+  );
+}
+
+function TikTokGlyph() {
+  return (
+    <span className="social-glyph social-glyph-tiktok" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+        <path d="M14.5 3c.3 1.9 1.6 3.3 3.5 3.5v2.4c-1.3 0-2.5-.4-3.5-1.1v6.3c0 2.8-2.3 5-5.1 4.8-2.6-.2-4.6-2.4-4.5-5 .1-2.5 2.2-4.5 4.8-4.5.3 0 .6 0 .9.1v2.5c-.3-.1-.6-.2-.9-.2-1.2 0-2.2.9-2.3 2.1-.1 1.3.9 2.4 2.2 2.5 1.3.1 2.4-.9 2.4-2.2V3h2.5Z" />
+      </svg>
+    </span>
+  );
+}
+
+function LineGlyph() {
+  return (
+    <span className="social-glyph social-glyph-line" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+        <path d="M12 3C6.5 3 2 6.6 2 11c0 3.9 3.5 7.2 8.3 7.9.3.1.8.3.9.6.1.3 0 .8 0 1.1l-.2 1c0 .3-.2 1.1.9.6 1.2-.5 6.3-3.7 8.6-6.3C21.9 14 22 12.5 22 11c0-4.4-4.5-8-10-8Z" />
+      </svg>
+    </span>
   );
 }
