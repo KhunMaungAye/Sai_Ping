@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { ReviewTagList, ReviewTagPicker } from "@/app/components/review-tags";
+import type { ReviewTag } from "@/lib/review-tags";
 
 type BookingDetails = {
   id: string;
@@ -12,6 +14,7 @@ type BookingDetails = {
   cleanerName: string;
   rating: number | null;
   review: string | null;
+  tags?: ReviewTag[];
 };
 
 function formatDate(value: string) {
@@ -26,6 +29,7 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
   const [booking, setBooking] = useState<BookingDetails | null>(null);
   const [stars, setStars] = useState(0);
   const [review, setReview] = useState("");
+  const [tags, setTags] = useState<ReviewTag[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -50,6 +54,7 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
         if (result.booking.rating !== null) {
           setStars(result.booking.rating);
           setReview(result.booking.review ?? "");
+          setTags(result.booking.tags ?? []);
           setIsRated(true);
         }
       })
@@ -75,7 +80,7 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ stars, review: review.trim() || null }),
+          body: JSON.stringify({ stars, review: review.trim() || null, tags }),
         },
       );
       const result = (await response.json()) as {
@@ -172,6 +177,7 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
                 Your {stars}-star rating is saved with this completed service.
               </p>
               {review ? <p className="submitted-review">“{review}”</p> : null}
+              <ReviewTagList tags={tags} />
             </div>
           ) : (
             <div className="rating-entry">
@@ -211,6 +217,8 @@ export default function RatingForm({ bookingId }: { bookingId: string }) {
                 value={review}
                 onChange={(e) => setReview(e.target.value)}
               />
+              <span className="field-label">What stood out? (optional)</span>
+              <ReviewTagPicker value={tags} onChange={setTags} disabled={isSubmitting} />
               {error ? (
                 <p className="form-error" role="alert">
                   {error}

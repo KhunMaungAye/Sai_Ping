@@ -28,6 +28,7 @@ import {
 } from "./date-utils.ts";
 import { bookingBadge, type BookingBadge } from "./booking-badges.ts";
 import { frequencyLabel, type SubscriptionChanges } from "./subscription-changes.ts";
+import { readStoredTags, type ReviewTag } from "./review-tags.ts";
 
 export {
   addDaysToDateString,
@@ -85,6 +86,8 @@ export type CustomerBooking = {
   subscriptionId: string | null;
   rating: number | null;
   review: string | null;
+  /** US-16: feedback tags the customer added to their rating. */
+  reviewTags?: ReviewTag[];
   isUpcoming: boolean;
   /** US-05: true when the customer may cancel this booking right now. */
   canCancel?: boolean;
@@ -128,6 +131,8 @@ export type BookingRatingDetails = {
   isAccepted: boolean;
   rating: number | null;
   review: string | null;
+  /** US-16: feedback tags saved with the rating. */
+  tags: ReviewTag[];
 };
 
 export type SubscriptionInput = {
@@ -370,6 +375,10 @@ function initDatabaseSchema(database: DatabaseSync) {
     .all() as { name: string }[];
   if (!ratingColumns.some((column) => column.name === "review")) {
     database.exec("ALTER TABLE ratings ADD COLUMN review TEXT;");
+  }
+  // US-16: feedback tags (JSON array, e.g. ["Punctual","Detailed"])
+  if (!ratingColumns.some((column) => column.name === "tags")) {
+    database.exec("ALTER TABLE ratings ADD COLUMN tags TEXT;");
   }
 
   // US-15: pausing and skipping recurring cleanings
@@ -1046,7 +1055,8 @@ export function getBookingRatingDetails(
         cleaners.id AS cleaner_id,
         cleaners.name AS cleaner_name,
         ratings.stars AS rating,
-        ratings.review AS review
+        ratings.review AS review,
+        ratings.tags AS tags
       FROM bookings
       JOIN cleaners ON cleaners.id = bookings.cleaner_id
       LEFT JOIN ratings ON ratings.booking_id = bookings.id
@@ -1066,6 +1076,7 @@ export function getBookingRatingDetails(
         cleaner_name: string;
         rating: number | null;
         review: string | null;
+        tags: string | null;
       }
     | undefined;
 
@@ -1081,6 +1092,7 @@ export function getBookingRatingDetails(
     isAccepted: Boolean(row.accepted_by_id),
     rating: row.rating,
     review: row.review ?? null,
+    tags: readStoredTags(row.tags),
   };
 }
 
@@ -1144,6 +1156,7 @@ export function submitBookingRating(
   id: string,
   stars: number,
   review: string | null = null,
+  tags: readonly ReviewTag[] = [],
 ) {
   const database = getDatabase();
   database.exec("BEGIN IMMEDIATE;");
@@ -1173,7 +1186,7 @@ export function submitBookingRating(
 
     database
       .prepare(
-        "INSERT INTO ratings (id, booking_id, cleaner_id, stars, review, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO ratings (id, booking_id, cleaner_id, stars, review, tags, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         randomUUID(),
@@ -1181,10 +1194,11 @@ export function submitBookingRating(
         booking.cleaner_id,
         stars,
         review?.trim() || null,
+        tags.length ? JSON.stringify(tags) : null,
         new Date().toISOString(),
       );
     database.exec("COMMIT;");
-    return { status: "rated" as const, stars, review: review?.trim() || null };
+    return { status: "rated" as const, stars, review: review?.trim() || null, tags: [...tags] };
   } catch (error) {
     database.exec("ROLLBACK;");
     throw error;
@@ -1236,7 +1250,8 @@ function readCustomerBookings(customerEmail: string, now: Date) {
         bookings.accepted_by_name,
         bookings.accepted_at,
         ratings.stars AS rating,
-        ratings.review AS review
+        ratings.review AS review,
+        ratings.tags AS review_tags
       FROM bookings
       JOIN cleaners ON cleaners.id = bookings.cleaner_id
       LEFT JOIN ratings ON ratings.booking_id = bookings.id
@@ -1265,6 +1280,7 @@ function readCustomerBookings(customerEmail: string, now: Date) {
       accepted_at: string | null;
       rating: number | null;
       review: string | null;
+      review_tags: string | null;
     }>;
 
   // Visits happen in Bangkok, so "today" is the Bangkok date (US-14).
@@ -1299,6 +1315,7 @@ function readCustomerBookings(customerEmail: string, now: Date) {
       subscriptionId: row.subscription_id ?? null,
       rating: row.rating ?? null,
       review: row.review ?? null,
+      reviewTags: readStoredTags(row.review_tags),
       isUpcoming,
       canCancel:
         row.status === "scheduled" &&
@@ -2225,6 +2242,8 @@ export type AdminReview = {
   cleanerName: string;
   stars: number;
   review: string | null;
+  /** US-16: feedback tags the customer picked. */
+  tags: ReviewTag[];
   createdAt: string;
 };
 
@@ -2349,7 +2368,11 @@ export function getAdminCustomerSummaries(): AdminCustomerSummary[] {
   return summaries.sort((a, b) => b.totalBookings - a.totalBookings);
 }
 
-export function listReviews(): AdminReview[] {
+/**
+ * Every rating with its review and tags, newest first. US-16: pass a cleaner id
+ * to get only that cleaner's ratings (what the cleaner's dashboard shows).
+ */
+export function listReviews(cleanerId?: string): AdminReview[] {
   const rows = getDatabase()
     .prepare(
       `SELECT
@@ -2362,13 +2385,15 @@ export function listReviews(): AdminReview[] {
         COALESCE(bookings.accepted_by_name, cleaners.name) AS cleaner_name,
         ratings.stars,
         ratings.review,
+        ratings.tags,
         ratings.created_at
       FROM ratings
       JOIN bookings ON bookings.id = ratings.booking_id
       JOIN cleaners ON cleaners.id = ratings.cleaner_id
+      ${cleanerId === undefined ? "" : "WHERE ratings.cleaner_id = ?"}
       ORDER BY ratings.created_at DESC`,
     )
-    .all() as Array<{
+    .all(...(cleanerId === undefined ? [] : [cleanerId])) as Array<{
     booking_id: string;
     service_name: string;
     service_date: string;
@@ -2378,6 +2403,7 @@ export function listReviews(): AdminReview[] {
     cleaner_name: string;
     stars: number;
     review: string | null;
+    tags: string | null;
     created_at: string;
   }>;
 
@@ -2391,6 +2417,7 @@ export function listReviews(): AdminReview[] {
     cleanerName: row.cleaner_name,
     stars: row.stars,
     review: row.review,
+    tags: readStoredTags(row.tags),
     createdAt: row.created_at,
   }));
 }

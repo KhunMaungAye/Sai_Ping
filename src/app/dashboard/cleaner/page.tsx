@@ -7,6 +7,7 @@ import type { CleanerCancelledJob, CustomerBooking } from "@/lib/booking-store";
 import { bangkokDateString } from "@/lib/date-utils";
 import { getServiceStartTime } from "@/lib/services";
 import { jobPreparation, type JobPreparation } from "@/lib/service-specs";
+import { CleanerReviews } from "@/app/components/cleaner-reviews";
 import { signOut, useSession } from "@/lib/use-session";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -58,7 +59,7 @@ export default function CleanerDashboardPage() {
   const [draftDays, setDraftDays] = useState<number[]>([]);
   const [savingDays, setSavingDays] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "available" | "scheduled" | "completed" | "availability"
+    "available" | "scheduled" | "completed" | "availability" | "reviews"
   >("available");
   const [cancelledJobs, setCancelledJobs] = useState<CleanerCancelledJob[]>([]);
   const [completingId, setCompletingId] = useState<string | null>(null);
@@ -370,6 +371,16 @@ export default function CleanerDashboardPage() {
             <span>My Availability</span>
             <span className="tab-badge">{availableDays.length}d</span>
           </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "reviews"}
+            className={`dashboard-tab${activeTab === "reviews" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("reviews")}
+          >
+            <span>My Reviews</span>
+          </button>
         </nav>
 
         {/* Tab content */}
@@ -653,6 +664,9 @@ export default function CleanerDashboardPage() {
               )}
             </div>
           )}
+
+          {/* US-16: the cleaner's own ratings, written reviews and tags */}
+          {activeTab === "reviews" && <CleanerReviews />}
 
           {activeTab === "availability" && (
             <div className="availability-panel">

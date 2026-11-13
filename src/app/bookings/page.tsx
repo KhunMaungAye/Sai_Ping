@@ -27,6 +27,8 @@ import {
 } from "@/lib/date-utils";
 import { RecurringPlans } from "../components/recurring-plans";
 import { RecommendedCleaner } from "../components/recommended-cleaner";
+import { ReviewTagList, ReviewTagPicker } from "../components/review-tags";
+import type { ReviewTag } from "@/lib/review-tags";
 
 function dateString(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
@@ -925,6 +927,8 @@ function BookingCard({
   const isAccepted = Boolean(booking.acceptedByName || booking.isAccepted);
   const badge = booking.badge ?? bookingBadge(booking.status, isAccepted, booking.isUpcoming);
   const [isRating, setIsRating] = useState(false);
+  // US-16: shown on the card once the server has saved the rating.
+  const [ratingSavedMessage, setRatingSavedMessage] = useState("");
   // US-05: cancelling asks for a second click, then calls the API.
   const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -1117,15 +1121,26 @@ function BookingCard({
         </div>
       ) : null}
 
+      {ratingSavedMessage ? (
+        <p className="plan-success" role="status">
+          {ratingSavedMessage}
+        </p>
+      ) : null}
+
       {isCompleted && booking.rating !== null && booking.review ? (
         <p className="submitted-review">Your review: “{booking.review}”</p>
       ) : null}
+      {isCompleted && booking.rating !== null ? <ReviewTagList tags={booking.reviewTags ?? []} /> : null}
 
       {isCompleted && booking.rating === null && isRating ? (
         <InlineRatingForm
           booking={booking}
           onCancel={() => setIsRating(false)}
-          onSaved={onRated}
+          onSaved={(message) => {
+            setRatingSavedMessage(message);
+            setIsRating(false);
+            onRated();
+          }}
         />
       ) : null}
     </article>
@@ -1167,10 +1182,11 @@ function InlineRatingForm({
 }: {
   booking: CustomerBooking;
   onCancel: () => void;
-  onSaved: () => void;
+  onSaved: (message: string) => void;
 }) {
   const [stars, setStars] = useState(0);
   const [review, setReview] = useState("");
+  const [tags, setTags] = useState<ReviewTag[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const cleaner = booking.acceptedByName || booking.cleanerName;
@@ -1187,11 +1203,11 @@ function InlineRatingForm({
       const res = await fetch(`/api/bookings/${encodeURIComponent(booking.id)}/rating`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stars, review: review.trim() || null }),
+        body: JSON.stringify({ stars, review: review.trim() || null, tags }),
       });
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      const data = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
       if (!res.ok) throw new Error(data?.error ?? "Your rating could not be saved.");
-      onSaved();
+      onSaved(data?.message ?? "Thank you! Your rating and review have been saved.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Your rating could not be saved.");
       setIsSaving(false);
@@ -1229,6 +1245,8 @@ function InlineRatingForm({
         value={review}
         onChange={(e) => setReview(e.target.value)}
       />
+      <span className="field-label">What stood out? (optional)</span>
+      <ReviewTagPicker value={tags} onChange={setTags} disabled={isSaving} />
       {error ? (
         <p className="form-error" role="alert" style={{ margin: 0 }}>
           {error}

@@ -25,6 +25,9 @@ import {
 import { signOut, useSession } from "@/lib/use-session";
 import { NoShowAlertsPanel, NoShowBanner, useNoShowAlerts } from "@/app/components/no-show-alerts";
 import { ReassignControl } from "@/app/components/reassign-control";
+import { ReviewSummaryBar } from "@/app/components/cleaner-reviews";
+import { ReviewTagList } from "@/app/components/review-tags";
+import { summarizeReviews } from "@/lib/review-tags";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -642,6 +645,9 @@ export default function AdminDashboardPage() {
                 <p>Customer ratings and reviews appear here once completed cleanings are rated.</p>
               </div>
             ) : (
+              <>
+              {/* US-16: overall average and the most-used feedback tags */}
+              <ReviewSummaryBar summary={summarizeReviews(reviews)} title="Rating summary for all cleaners" />
               <div className="review-list">
                 {reviews.map((r) => (
                   <article key={r.bookingId} className="review-card">
@@ -652,6 +658,7 @@ export default function AdminDashboardPage() {
                     <p className="review-text">
                       {r.review ? `“${r.review}”` : <em style={{ color: "var(--muted)" }}>No written review</em>}
                     </p>
+                    <ReviewTagList tags={r.tags ?? []} />
                     <p className="review-meta">
                       <strong>{r.customerName}</strong> rated <strong>{r.cleanerName}</strong> ·{" "}
                       {r.serviceName} on {displayDate(r.serviceDate)}
@@ -659,6 +666,7 @@ export default function AdminDashboardPage() {
                   </article>
                 ))}
               </div>
+              </>
             )}
           </section>
         ) : null}
