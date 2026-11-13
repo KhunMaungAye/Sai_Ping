@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   SERVICES,
   TIME_SLOTS,
+  CANCELLATION_NOTICE_HOURS,
   getServiceStartTime,
   isWithinCancellationWindow,
   type BookingTime,
@@ -123,6 +124,8 @@ export type CustomerBooking = {
   isUpcoming: boolean;
   /** US-05: true when the customer may cancel this booking right now. */
   canCancel?: boolean;
+  /** Bug Card 2: true when the customer may edit this booking right now. */
+  canEdit?: boolean;
   /** US-14: the status badge shown to the customer. */
   badge?: BookingBadge;
   /** US-09: when the assigned cleaner checked in at the address. */
@@ -1353,6 +1356,12 @@ function readCustomerBookings(customerEmail: string, now: Date) {
         row.status === "scheduled" &&
         !row.subscription_id &&
         isWithinCancellationWindow(row.service_date, row.time_slot, now),
+      // Same window as cancelling: changing the date/time this close in is
+      // just as disruptive to the cleaner's day as cancelling would be.
+      canEdit:
+        row.status === "scheduled" &&
+        !row.subscription_id &&
+        isWithinCancellationWindow(row.service_date, row.time_slot, now),
       badge,
     };
   });
@@ -1547,6 +1556,149 @@ export function cancelCustomerBooking(
       message: `Your ${booking.service_name} on ${displayDayAndDate(booking.service_date)} at ${displaySlotTime(booking.time_slot)} has been cancelled. You won't be charged.`,
     };
   });
+}
+
+export type EditBookingResult =
+  | { status: "edited"; booking: CustomerBooking; message: string }
+  | { status: "not-found" }
+  | { status: "completed" }
+  | { status: "recurring" }
+  | { status: "too-late" }
+  | { status: "invalid"; error: string }
+  | { status: "unavailable" };
+
+/**
+ * Bug Card 2: lets a customer change the date, arrival window and/or special
+ * instructions of one of their own one-time bookings.
+ * - Allowed only while the CURRENT visit is at least 24 hours away (the same
+ *   rule as US-05 cancelling), and the new date/time must also be at least
+ *   24 hours away.
+ * - Completed bookings and recurring-plan visits (use Manage Plan) can't be
+ *   edited here.
+ * - If a cleaner had already accepted the booking and the date or time
+ *   changes, the booking goes back to an open request (that cleaner may not
+ *   be free at the new time); changing only the instructions keeps them.
+ * - Someone else's booking is reported as not found, so ids can't be probed.
+ */
+export function editCustomerBooking(
+  bookingId: string,
+  customerEmail: string,
+  updates: { date: string; time: BookingTime; specialInstructions: string | null },
+  nowOverride?: Date,
+): EditBookingResult {
+  const email = customerEmail.trim().toLowerCase();
+
+  type Outcome =
+    | { ok: true; dateChanged: boolean; wasAccepted: boolean }
+    | { ok: false; result: EditBookingResult };
+
+  const outcome: Outcome = withTransaction(() => {
+    // Read the clock after BEGIN IMMEDIATE has the lock, same reasoning as
+    // cancelCustomerBooking.
+    const now = nowOverride ?? new Date();
+    const database = getDatabase();
+    const booking = database
+      .prepare(
+        `SELECT id, service_date, time_slot, accepted_by_id, accepted_by_name,
+                status, subscription_id
+         FROM bookings WHERE id = ? AND LOWER(email) = ?`,
+      )
+      .get(bookingId, email) as
+      | {
+          id: string;
+          service_date: string;
+          time_slot: BookingTime;
+          accepted_by_id: string | null;
+          accepted_by_name: string | null;
+          status: "scheduled" | "completed";
+          subscription_id: string | null;
+        }
+      | undefined;
+
+    if (!booking) return { ok: false, result: { status: "not-found" as const } };
+    if (booking.status === "completed") {
+      return { ok: false, result: { status: "completed" as const } };
+    }
+    if (booking.subscription_id) {
+      return { ok: false, result: { status: "recurring" as const } };
+    }
+    if (!isWithinCancellationWindow(booking.service_date, booking.time_slot, now)) {
+      return { ok: false, result: { status: "too-late" as const } };
+    }
+
+    const dateChanged =
+      updates.date !== booking.service_date || updates.time !== booking.time_slot;
+
+    if (dateChanged) {
+      if (!isBookableDate(updates.date)) {
+        return {
+          ok: false,
+          result: { status: "invalid" as const, error: "Choose a date from today onward." },
+        };
+      }
+      if (!isServiceDayAvailable(updates.date)) {
+        return {
+          ok: false,
+          result: {
+            status: "invalid" as const,
+            error: "No cleaner works on that day yet. Choose another date.",
+          },
+        };
+      }
+      if (!isWithinCancellationWindow(updates.date, updates.time, now)) {
+        return {
+          ok: false,
+          result: {
+            status: "invalid" as const,
+            error: `Choose a date and time at least ${CANCELLATION_NOTICE_HOURS} hours from now.`,
+          },
+        };
+      }
+      const clash = database
+        .prepare(
+          "SELECT id FROM bookings WHERE service_date = ? AND time_slot = ? AND id != ?",
+        )
+        .get(updates.date, updates.time, booking.id);
+      if (clash) return { ok: false, result: { status: "unavailable" as const } };
+    }
+
+    const wasAccepted = Boolean(booking.accepted_by_id);
+    if (dateChanged && wasAccepted) {
+      database
+        .prepare(
+          `UPDATE bookings
+           SET service_date = ?, time_slot = ?, special_instructions = ?,
+               accepted_by_id = NULL, accepted_by_name = NULL, accepted_at = NULL
+           WHERE id = ?`,
+        )
+        .run(updates.date, updates.time, updates.specialInstructions, booking.id);
+    } else {
+      database
+        .prepare(
+          "UPDATE bookings SET service_date = ?, time_slot = ?, special_instructions = ? WHERE id = ?",
+        )
+        .run(updates.date, updates.time, updates.specialInstructions, booking.id);
+    }
+
+    return { ok: true, dateChanged, wasAccepted };
+  });
+
+  if (!outcome.ok) return outcome.result;
+
+  // Read the updated row back outside the transaction (getCustomerBookings
+  // opens its own), so the response matches exactly what the page will show.
+  const now = nowOverride ?? new Date();
+  const updated = getCustomerBookings(email, now).bookings.find((b) => b.id === bookingId);
+  if (!updated) return { status: "not-found" };
+
+  const message =
+    outcome.dateChanged && outcome.wasAccepted
+      ? `Your booking has been moved to ${displayDayAndDate(updated.date)} at ${displaySlotTime(updated.time)}. Since the date or time changed, it's an open request again until a cleaner accepts it.`
+      : outcome.dateChanged
+      ? `Your booking has been moved to ${displayDayAndDate(updated.date)} at ${displaySlotTime(updated.time)}.`
+      : "Your booking's special instructions have been updated.";
+
+  return { status: "edited", booking: updated, message };
 }
 
 export function deleteCustomerSession(token: string): void {

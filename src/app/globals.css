@@ -1261,6 +1261,46 @@ a {
   cursor: wait;
 }
 
+/* Bug Card 2: editing a booking */
+.edit-booking-form {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sky);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.edit-booking-intro {
+  margin: 0 0 14px;
+}
+
+.edit-booking-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.edit-booking-form .field-label {
+  margin-bottom: 14px;
+}
+
+.edit-booking-form .field-label:last-of-type {
+  margin-bottom: 4px;
+}
+
+.edit-booking-form .form-error {
+  margin-top: 10px;
+}
+
+@media (max-width: 480px) {
+  .edit-booking-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .cancelled-bookings-group {
   margin-top: 40px;
 }
