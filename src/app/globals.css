@@ -3614,3 +3614,11 @@ html {
 .review-stars-empty {
   color: var(--line);
 }
+
+/* Bug Card 1: a message right under the form field that needs fixing */
+.field-error {
+  margin: 6px 0 0;
+  color: #c0392b;
+  font-size: 13px;
+  font-weight: 600;
+}
