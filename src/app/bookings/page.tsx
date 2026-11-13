@@ -24,6 +24,7 @@ import {
 import {
   getDayNameFromDateString,
   getNextServiceDate,
+  localDateString,
 } from "@/lib/date-utils";
 import { RecurringPlans } from "../components/recurring-plans";
 import { RecommendedCleaner } from "../components/recommended-cleaner";
@@ -406,7 +407,9 @@ export default function CustomerBookingsPage() {
   }
 
   // US-05: show the cancellation confirmation at the top and reload the lists.
-  function handleCancelled(message: string) {
+  // Shared by cancelling (US-05) and editing (Bug Card 2): show the
+  // confirmation banner at the top and reload the lists.
+  function handleBookingChanged(message: string) {
     setBookingSuccessMsg(message);
     setRefresh((v) => v + 1);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -583,7 +586,7 @@ export default function CustomerBookingsPage() {
                 ) : (
                   <div className="booking-card-list">
                     {upcomingBookings.map((booking) => (
-                      <BookingCard key={booking.id} booking={booking} onRated={() => setRefresh((v) => v + 1)} onCancelled={handleCancelled} />
+                      <BookingCard key={booking.id} booking={booking} onRated={() => setRefresh((v) => v + 1)} onChanged={handleBookingChanged} />
                     ))}
                   </div>
                 )}
@@ -605,7 +608,7 @@ export default function CustomerBookingsPage() {
                     {previousBookings.length > 0 ? (
                       <div className="booking-card-list">
                         {previousBookings.map((booking) => (
-                          <BookingCard key={booking.id} booking={booking} onRated={() => setRefresh((v) => v + 1)} onCancelled={handleCancelled} />
+                          <BookingCard key={booking.id} booking={booking} onRated={() => setRefresh((v) => v + 1)} onChanged={handleBookingChanged} />
                         ))}
                       </div>
                     ) : null}
@@ -634,7 +637,7 @@ export default function CustomerBookingsPage() {
                       {upcomingBookings.length > 0 ? (
                         <div className="booking-card-list">
                           {upcomingBookings.map((b) => (
-                            <BookingCard key={b.id} booking={b} onRated={() => setRefresh((v) => v + 1)} onCancelled={handleCancelled} />
+                            <BookingCard key={b.id} booking={b} onRated={() => setRefresh((v) => v + 1)} onChanged={handleBookingChanged} />
                           ))}
                         </div>
                       ) : (
@@ -649,7 +652,7 @@ export default function CustomerBookingsPage() {
                       {previousBookings.length > 0 ? (
                         <div className="booking-card-list">
                           {previousBookings.map((b) => (
-                            <BookingCard key={b.id} booking={b} onRated={() => setRefresh((v) => v + 1)} onCancelled={handleCancelled} />
+                            <BookingCard key={b.id} booking={b} onRated={() => setRefresh((v) => v + 1)} onChanged={handleBookingChanged} />
                           ))}
                         </div>
                       ) : (
@@ -946,11 +949,11 @@ export default function CustomerBookingsPage() {
 function BookingCard({
   booking,
   onRated,
-  onCancelled,
+  onChanged,
 }: {
   booking: CustomerBooking;
   onRated: () => void;
-  onCancelled: (message: string) => void;
+  onChanged: (message: string) => void;
 }) {
   const isCompleted = booking.status === "completed";
   const isAccepted = Boolean(booking.acceptedByName || booking.isAccepted);
@@ -962,7 +965,16 @@ function BookingCard({
   const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState("");
+  // Bug Card 2: editing opens an inline form for date, arrival window and
+  // special instructions.
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editDate, setEditDate] = useState(booking.date);
+  const [editTime, setEditTime] = useState<BookingTime>(booking.time);
+  const [editInstructions, setEditInstructions] = useState(booking.specialInstructions ?? "");
   const showCancelOption = !isCompleted && booking.isUpcoming;
+  const showEditOption = !isCompleted && booking.isUpcoming;
 
   async function confirmCancel() {
     setIsCancelling(true);
@@ -981,10 +993,56 @@ function BookingCard({
         setIsCancelling(false);
         return;
       }
-      onCancelled(data.message ?? "Your booking has been cancelled.");
+      onChanged(data.message ?? "Your booking has been cancelled.");
     } catch {
       setCancelError("Your booking could not be cancelled. Please try again.");
       setIsCancelling(false);
+    }
+  }
+
+  function openEditForm() {
+    setEditError("");
+    setEditDate(booking.date);
+    setEditTime(booking.time);
+    setEditInstructions(booking.specialInstructions ?? "");
+    setIsEditing(true);
+  }
+
+  async function confirmEdit(event: FormEvent) {
+    event.preventDefault();
+    setIsSaving(true);
+    setEditError("");
+    try {
+      const instructions = parseSpecialInstructions(editInstructions);
+      if (!instructions.ok) {
+        setEditError(instructions.error);
+        setIsSaving(false);
+        return;
+      }
+      const response = await fetch(`/api/bookings/${booking.id}/edit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          date: editDate,
+          time: editTime,
+          specialInstructions: instructions.value,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        message?: string;
+        error?: string;
+      };
+      if (!response.ok) {
+        setEditError(data.error ?? "Your booking could not be updated. Please try again.");
+        setIsSaving(false);
+        return;
+      }
+      setIsEditing(false);
+      onChanged(data.message ?? "Your booking has been updated.");
+    } catch {
+      setEditError("Your booking could not be updated. Please try again.");
+      setIsSaving(false);
     }
   }
 
@@ -1092,7 +1150,12 @@ function BookingCard({
               Request placed — awaiting cleaner acceptance
             </span>
           )}
-          {showCancelOption && booking.canCancel && !isConfirmingCancel ? (
+          {showEditOption && booking.canEdit && !isConfirmingCancel && !isEditing ? (
+            <button type="button" className="action-button-link" onClick={openEditForm}>
+              Edit booking
+            </button>
+          ) : null}
+          {showCancelOption && booking.canCancel && !isConfirmingCancel && !isEditing ? (
             <button
               type="button"
               className="cancel-booking-link"
@@ -1110,9 +1173,93 @@ function BookingCard({
       {showCancelOption && !booking.canCancel ? (
         <p className="cancel-booking-note">
           {booking.subscriptionId
-            ? "This visit is part of a recurring plan. To cancel just this visit, use Skip in My plans."
-            : "This booking can no longer be cancelled online because it starts in less than 24 hours."}
+            ? "This visit is part of a recurring plan. To change or cancel just this visit, use Manage Plan / Skip in My plans."
+            : "This booking can no longer be edited or cancelled online because it starts in less than 24 hours."}
         </p>
+      ) : null}
+
+      {showEditOption && booking.canEdit && isEditing ? (
+        <form
+          className="edit-booking-form"
+          aria-label="Edit booking"
+          onSubmit={confirmEdit}
+        >
+          <p className="edit-booking-intro">
+            <strong>Edit this booking.</strong>{" "}
+            {booking.acceptedByName
+              ? `Changing the date or time will tell ${booking.acceptedByName} this visit is off, and it will go back to an open request. `
+              : ""}
+            Changes need at least 24 hours&apos; notice, same as cancelling.
+          </p>
+
+          <div className="edit-booking-grid">
+            <label className="field-label" htmlFor={`edit-date-${booking.id}`}>
+              Service date
+              <input
+                id={`edit-date-${booking.id}`}
+                type="date"
+                className="text-input date-input"
+                value={editDate}
+                min={localDateString()}
+                onChange={(e) => setEditDate(e.target.value)}
+                required
+              />
+            </label>
+
+            <label className="field-label" htmlFor={`edit-time-${booking.id}`}>
+              Arrival window
+              <select
+                id={`edit-time-${booking.id}`}
+                className="text-input"
+                value={editTime}
+                onChange={(e) => setEditTime(e.target.value as BookingTime)}
+              >
+                {TIME_SLOTS.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {displayTime(slot)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="field-label" htmlFor={`edit-instructions-${booking.id}`}>
+            Special instructions
+            <textarea
+              id={`edit-instructions-${booking.id}`}
+              className="text-input special-instructions-input"
+              rows={3}
+              maxLength={SPECIAL_INSTRUCTIONS_MAX_LENGTH}
+              value={editInstructions}
+              onChange={(e) => setEditInstructions(e.target.value)}
+            />
+          </label>
+          <div
+            className={`char-counter${editInstructions.length >= SPECIAL_INSTRUCTIONS_MAX_LENGTH ? " is-at-limit" : ""}`}
+          >
+            {editInstructions.length}/{SPECIAL_INSTRUCTIONS_MAX_LENGTH} characters
+          </div>
+
+          {editError ? (
+            <p className="form-error" role="alert">
+              {editError}
+            </p>
+          ) : null}
+
+          <div className="cancel-booking-actions">
+            <button type="submit" className="confirm-button" disabled={isSaving}>
+              {isSaving ? "Saving…" : "Save changes"}
+            </button>
+            <button
+              type="button"
+              className="inline-button"
+              onClick={() => setIsEditing(false)}
+              disabled={isSaving}
+            >
+              Discard changes
+            </button>
+          </div>
+        </form>
       ) : null}
 
       {showCancelOption && booking.canCancel && isConfirmingCancel ? (
