@@ -27,6 +27,7 @@ import {
   bangkokDateString,
 } from "./date-utils.ts";
 import { bookingBadge, type BookingBadge } from "./booking-badges.ts";
+import { frequencyLabel, type SubscriptionChanges } from "./subscription-changes.ts";
 
 export {
   addDaysToDateString,
@@ -2405,12 +2406,16 @@ export type SubscriptionPlanStatus = "active" | "paused" | "cancelled";
 
 export type CustomerSubscription = {
   id: string;
+  /** US-04: so the "Edit plan" form can start from the plan's current service. */
+  serviceId: ServiceId;
   serviceName: string;
   frequency: Frequency;
   preferredDay: string;
   time: BookingTime;
   priceCents: number;
   address: string;
+  /** US-04: the note on the plan's upcoming visits (every visit carries the same one). */
+  specialInstructions: string | null;
   status: SubscriptionPlanStatus;
   pausedUntil: string | null;
   /** The next visit that can still be skipped (after today, not completed). */
@@ -2429,6 +2434,7 @@ type SubscriptionVisitRow = {
   service_date: string;
   status: "scheduled" | "completed";
   accepted_by_id: string | null;
+  special_instructions?: string | null;
 };
 
 function planStatus(row: SubscriptionRowWithPause, today: string): SubscriptionPlanStatus {
@@ -2455,7 +2461,7 @@ function toCustomerSubscription(
   const database = getDatabase();
   const visits = database
     .prepare(
-      `SELECT id, service_date, status, accepted_by_id FROM bookings
+      `SELECT id, service_date, status, accepted_by_id, special_instructions FROM bookings
        WHERE subscription_id = ? ORDER BY service_date ASC`,
     )
     .all(row.id) as SubscriptionVisitRow[];
@@ -2470,15 +2476,19 @@ function toCustomerSubscription(
     (visit) => visit.status === "scheduled" && visit.service_date > today,
   );
   const next = upcoming[0];
+  // The newest visit carries the plan's current note (US-04 keeps them all in step).
+  const noteSource = upcoming[0] ?? visits[visits.length - 1];
 
   return {
     id: row.id,
+    serviceId: row.service_id,
     serviceName: row.service_name,
     frequency: row.frequency,
     preferredDay: row.preferred_day,
     time: row.time_slot,
     priceCents: row.price_cents,
     address: row.address,
+    specialInstructions: noteSource?.special_instructions ?? null,
     status: planStatus(row, today),
     pausedUntil: row.paused_until && row.paused_until > today ? row.paused_until : null,
     nextVisit: next
@@ -2791,6 +2801,222 @@ export function resumeSubscription(
       message += ` ${unavailable.map(displayDayAndDate).join(", ")} could not be restored because that time is no longer available.`;
     }
     return { status: "ok", subscription: updated, message, dates: restored };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// US-04: change a recurring plan's frequency or details
+// ---------------------------------------------------------------------------
+
+/**
+ * Changes how often a plan repeats, its day, arrival time, service, address or
+ * special instructions. Only visits after today that aren't completed change;
+ * past visits keep what the customer booked.
+ *
+ * - Detail changes (service, address, note) are applied to every upcoming visit.
+ * - Schedule changes (frequency, day, time) rebuild the upcoming visits from
+ *   tomorrow, keeping the same number of visits (or the plan's end date).
+ *   Visits already on the new schedule are kept, so their cleaner stays.
+ * - All or nothing: if any new date's slot is taken or no cleaner works that
+ *   day, nothing changes.
+ * - Removing a visit a cleaner already accepted needs `confirmAccepted`,
+ *   the same rule as skip and pause (US-15).
+ */
+export function updateSubscription(
+  subscriptionId: string,
+  customerEmail: string,
+  changes: SubscriptionChanges,
+  confirmAccepted = false,
+): SubscriptionChangeResult {
+  const today = localDateString();
+  return withTransaction(() => {
+    const database = getDatabase();
+    const sub = findOwnedSubscription(subscriptionId, customerEmail);
+    if (!sub) return { status: "not-found", error: "Recurring plan not found." };
+    if (sub.status === "cancelled") {
+      return { status: "conflict", error: "This plan has been cancelled." };
+    }
+
+    const upcoming = database
+      .prepare(
+        `SELECT id, service_date, status, accepted_by_id, special_instructions FROM bookings
+         WHERE subscription_id = ? AND status = 'scheduled' AND service_date > ?
+         ORDER BY service_date ASC`,
+      )
+      .all(sub.id, today) as SubscriptionVisitRow[];
+    if (upcoming.length === 0) {
+      return { status: "conflict", error: "There are no upcoming visits left on this plan to change." };
+    }
+
+    const currentNote = upcoming[0].special_instructions ?? null;
+    const next = {
+      frequency: changes.frequency ?? sub.frequency,
+      preferredDay: changes.preferredDay ?? (normalizeDayName(sub.preferred_day) ?? sub.preferred_day),
+      time: changes.time ?? sub.time_slot,
+      serviceId: changes.serviceId ?? sub.service_id,
+      address: changes.address ?? sub.address,
+      note: changes.specialInstructions !== undefined ? changes.specialInstructions : currentNote,
+    };
+    const scheduleChanged =
+      next.frequency !== sub.frequency ||
+      next.preferredDay !== sub.preferred_day ||
+      next.time !== sub.time_slot;
+    const serviceChanged = next.serviceId !== sub.service_id;
+    const addressChanged = next.address !== sub.address;
+    const noteChanged = next.note !== currentNote;
+
+    if (!scheduleChanged && !serviceChanged && !addressChanged && !noteChanged) {
+      return { status: "invalid", error: "Nothing changed: these are already your plan's settings." };
+    }
+    if (scheduleChanged && planStatus(sub, today) === "paused") {
+      return {
+        status: "conflict",
+        error: "Resume your plan before changing its day, time or how often it repeats.",
+      };
+    }
+
+    const service = SERVICES.find((item) => item.id === next.serviceId)!;
+    let kept = upcoming;
+    let toCreate: string[] = [];
+
+    if (scheduleChanged) {
+      const skipped = new Set(
+        (
+          database
+            .prepare("SELECT service_date FROM subscription_skips WHERE subscription_id = ? AND service_date > ?")
+            .all(sub.id, today) as Array<{ service_date: string }>
+        ).map((row) => row.service_date),
+      );
+      const sameTime = next.time === sub.time_slot;
+      const scheduled = generateRecurringDates({
+        startDate: addDaysToDateString(today, 1),
+        frequency: next.frequency,
+        preferredDay: next.preferredDay,
+        endDate: sub.end_date,
+        occurrences: upcoming.length,
+      });
+      // A date the customer skipped stays skipped if it's still on the schedule.
+      const newDates = scheduled.filter((date) => !(sameTime && skipped.has(date)));
+      if (scheduled.length === 0) {
+        return {
+          status: "invalid",
+          error: "No visits fit before your plan's end date with that day. Choose another day.",
+        };
+      }
+
+      kept = upcoming.filter((visit) => sameTime && newDates.includes(visit.service_date));
+      const keptDates = new Set(kept.map((visit) => visit.service_date));
+      const removed = upcoming.filter((visit) => !keptDates.has(visit.service_date));
+      toCreate = newDates.filter((date) => !keptDates.has(date));
+
+      const accepted = removed.filter((visit) => visit.accepted_by_id);
+      if (accepted.length && !confirmAccepted) {
+        const dates = accepted.map((visit) => visit.service_date);
+        return {
+          status: "needs-confirmation",
+          error:
+            `A cleaner has already accepted ${dates.length === 1 ? "your" : `${dates.length} of your`} ` +
+            `${dates.map(displayDayAndDate).join(", ")} visit${dates.length === 1 ? "" : "s"}. ` +
+            `If you change the schedule, they lose ${dates.length === 1 ? "this job" : "these jobs"}.`,
+          dates,
+        };
+      }
+
+      // Check every new slot before changing anything. The plan's own removed
+      // visits don't count as taken, since they are about to be freed.
+      const removedIds = new Set(removed.map((visit) => visit.id));
+      const servicedDays = getServicedWeekdays();
+      for (const date of toCreate) {
+        const taken = database
+          .prepare("SELECT id FROM bookings WHERE service_date = ? AND time_slot = ?")
+          .all(date, next.time) as Array<{ id: string }>;
+        const takenByOthers = taken.some((row) => !removedIds.has(row.id));
+        if (takenByOthers || !servicedDays.has(getDayOfWeekFromDateString(date))) {
+          return {
+            status: "conflict",
+            error:
+              `Your plan wasn't changed: ${displayDayAndDate(date)} at ${displaySlotTime(next.time)} ` +
+              "is already booked or no cleaner works that day. Try another day or time.",
+          };
+        }
+      }
+
+      for (const visit of removed) {
+        database.prepare("DELETE FROM bookings WHERE id = ?").run(visit.id);
+      }
+      // Skips for dates that are no longer on the schedule mean nothing now.
+      const scheduledSet = new Set(scheduled);
+      for (const date of skipped) {
+        if (!scheduledSet.has(date) || !sameTime) {
+          database
+            .prepare("DELETE FROM subscription_skips WHERE subscription_id = ? AND service_date = ?")
+            .run(sub.id, date);
+        }
+      }
+    }
+
+    // Details apply to every upcoming visit that stays, accepted ones included,
+    // so the cleaner sees the new address and note.
+    const updateVisit = database.prepare(
+      `UPDATE bookings SET service_id = ?, service_name = ?, price_cents = ?, address = ?,
+         special_instructions = ? WHERE id = ?`,
+    );
+    for (const visit of kept) {
+      updateVisit.run(service.id, service.name, service.priceCents, next.address, next.note, visit.id);
+    }
+    const insertVisit = database.prepare(
+      `INSERT INTO bookings (
+        id, name, email, service_id, service_name, price_cents,
+        service_date, time_slot, address, special_instructions, created_at,
+        cleaner_id, status, subscription_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)`,
+    );
+    const createdAt = new Date().toISOString();
+    for (const date of toCreate) {
+      insertVisit.run(
+        randomUUID(), sub.name, sub.email, service.id, service.name, service.priceCents,
+        date, next.time, next.address, next.note, createdAt, sub.cleaner_id, sub.id,
+      );
+    }
+
+    database
+      .prepare(
+        `UPDATE subscriptions SET frequency = ?, preferred_day = ?, time_slot = ?,
+           service_id = ?, service_name = ?, price_cents = ?, address = ? WHERE id = ?`,
+      )
+      .run(
+        next.frequency, next.preferredDay, next.time,
+        service.id, service.name, service.priceCents, next.address, sub.id,
+      );
+
+    const updatedRow = database
+      .prepare("SELECT * FROM subscriptions WHERE id = ?")
+      .get(sub.id) as SubscriptionRowWithPause;
+    const updated = toCustomerSubscription(updatedRow, today);
+
+    const parts: string[] = [];
+    if (scheduleChanged) {
+      parts.push(
+        `It now repeats ${frequencyLabel(next.frequency)} on ${next.preferredDay}s at ${displaySlotTime(next.time)}.`,
+      );
+    }
+    const detailNames = [
+      serviceChanged ? `${service.name} service` : "",
+      addressChanged ? "address" : "",
+      noteChanged ? "special instructions" : "",
+    ].filter(Boolean);
+    if (detailNames.length) {
+      parts.push(`Your upcoming visits now use the new ${detailNames.join(", ")}.`);
+    }
+    if (updated.nextVisit) {
+      parts.push(`Your next cleaning is ${displayDayAndDate(updated.nextVisit.date)}.`);
+    }
+    return {
+      status: "ok",
+      subscription: updated,
+      message: `Your plan is updated. ${parts.join(" ")}`,
+      dates: toCreate,
+    };
   });
 }
 
