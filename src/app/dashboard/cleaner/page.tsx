@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { CleanerCancelledJob, CustomerBooking } from "@/lib/booking-store";
 import { bangkokDateString } from "@/lib/date-utils";
 import { getServiceStartTime } from "@/lib/services";
+import { jobPreparation, type JobPreparation } from "@/lib/service-specs";
 import { signOut, useSession } from "@/lib/use-session";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -507,6 +508,13 @@ export default function CleanerDashboardPage() {
                           <strong className="detail-value">{displayTime(job.time)}</strong>
                         </div>
 
+                        <div className="booking-detail-item">
+                          <span className="detail-label">Estimated Finish</span>
+                          <strong className="detail-value">
+                            {displayTime(jobPreparation(job.serviceId, job.time).end)}
+                          </strong>
+                        </div>
+
                         <div className="booking-detail-item booking-detail-span-full">
                           <span className="detail-label">Service Location</span>
                           <span className="detail-value-text">{job.address}</span>
@@ -519,6 +527,8 @@ export default function CleanerDashboardPage() {
                           <span className="detail-value-text">{job.email}</span>
                         </div>
                       </div>
+
+                      <PreparationDetails jobId={job.id} />
 
                       <VisitControls
                         job={job}
@@ -685,6 +695,120 @@ export default function CleanerDashboardPage() {
 }
 
 /** US-13: the customer's handling notes, or a clear message when there are none. */
+type PreparationResponse = {
+  job: {
+    customerName: string;
+    serviceName: string;
+    date: string;
+    time: string;
+    address: string;
+    specialInstructions: string | null;
+    isRecurring: boolean;
+  };
+  preparation: JobPreparation;
+};
+
+/**
+ * US-07: everything a cleaner needs to prepare for one job — the schedule and
+ * the service specs. Loaded from the server, which only returns jobs this
+ * cleaner accepted, so what they see always matches their assigned booking.
+ */
+function PreparationDetails({ jobId }: { jobId: string }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<PreparationResponse | null>(null);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!open || data) return;
+    const controller = new AbortController();
+    fetch(`/api/cleaner/bookings/${jobId}`, { cache: "no-store", signal: controller.signal })
+      .then(async (res) => {
+        const body = (await res.json().catch(() => null)) as (PreparationResponse & { error?: string }) | null;
+        if (!res.ok || !body?.preparation) {
+          throw new Error(body?.error || "Could not load the preparation details.");
+        }
+        setData(body);
+        setError("");
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Could not load the preparation details.");
+      });
+    return () => controller.abort();
+  }, [open, data, jobId, attempt]);
+
+  const panelId = `prep-${jobId}`;
+  return (
+    <div className="prep-details">
+      <button
+        type="button"
+        className="prep-toggle"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Hide preparation details" : "Preparation details"}
+      </button>
+
+      {open ? (
+        <div id={panelId} className="prep-panel">
+          {error ? (
+            <p className="form-error" role="alert">
+              {error}{" "}
+              <button type="button" className="text-button" onClick={() => setAttempt((v) => v + 1)}>
+                Try again
+              </button>
+            </p>
+          ) : !data ? (
+            <p className="field-hint">Loading preparation details…</p>
+          ) : (
+            <>
+              <section className="prep-section" aria-label="Schedule">
+                <h4>Schedule</h4>
+                <p className="prep-schedule">
+                  <strong>{displayDate(data.job.date)}</strong>
+                  <span>
+                    {displayTime(data.preparation.start)} – {displayTime(data.preparation.end)} (about{" "}
+                    {data.preparation.length})
+                  </span>
+                  {data.job.isRecurring ? <span className="prep-tag">Recurring plan</span> : null}
+                </p>
+                <p className="field-hint">
+                  {data.job.customerName} · {data.job.address}
+                </p>
+              </section>
+
+              <section className="prep-section" aria-label="Service specs">
+                <h4>{data.preparation.serviceName}: what&apos;s included</h4>
+                <ul className="prep-list">
+                  {data.preparation.includes.map((task) => (
+                    <li key={task}>{task}</li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="prep-section" aria-label="What to bring">
+                <h4>What to bring</h4>
+                <ul className="prep-list">
+                  {data.preparation.bring.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="prep-section" aria-label="Customer instructions">
+                <h4>Customer instructions</h4>
+                <p className="field-hint">{data.job.specialInstructions || "No special instructions."}</p>
+              </section>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SpecialInstructions({ note }: { note: string | null | undefined }) {
   return (
     <div className="booking-detail-item booking-detail-span-full">
