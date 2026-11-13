@@ -9,6 +9,8 @@ const ERRORS = {
   "not-found": { status: 404, error: "Booking not found." },
   "booking-completed": { status: 409, error: "This cleaning is already completed, so it can't be reassigned." },
   "booking-past": { status: 409, error: "This cleaning date has passed, so it can't be reassigned." },
+  // AI-02A: the chosen cleaner has another job too close to this one that day.
+  "travel-time": { status: 409, error: "Slot unavailable: travel time needed" },
   "invalid-cleaner": {
     status: 400,
     error: "Choose an active cleaner who works on that day (not the one already assigned).",
