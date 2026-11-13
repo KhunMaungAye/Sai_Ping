@@ -29,6 +29,38 @@ import {
 import { bookingBadge, type BookingBadge } from "./booking-badges.ts";
 import { frequencyLabel, type SubscriptionChanges } from "./subscription-changes.ts";
 import { readStoredTags, type ReviewTag } from "./review-tags.ts";
+import { TRAVEL_TIME_BLOCKED_MESSAGE, findTravelConflict } from "./travel-time.ts";
+
+export { TRAVEL_TIME_BLOCKED_MESSAGE };
+
+/**
+ * AI-02A: the scheduled job of `cleanerId` (not counting `bookingId` itself)
+ * that `bookingId` would start or end too close to, or null if the cleaner
+ * can take it. Only the cleaner's jobs on the same date are compared.
+ */
+export function findCleanerTravelConflict(cleanerId: string, bookingId: string) {
+  const database = getDatabase();
+  const candidate = database
+    .prepare("SELECT service_date, time_slot, service_id FROM bookings WHERE id = ?")
+    .get(bookingId) as { service_date: string; time_slot: string; service_id: ServiceId } | undefined;
+  if (!candidate) return null;
+  const sameDay = database
+    .prepare(
+      `SELECT id, service_date, time_slot, service_id FROM bookings
+       WHERE accepted_by_id = ? AND service_date = ? AND status = 'scheduled' AND id <> ?`,
+    )
+    .all(cleanerId, candidate.service_date, bookingId) as Array<{
+    id: string;
+    service_date: string;
+    time_slot: string;
+    service_id: ServiceId;
+  }>;
+  const conflict = findTravelConflict(
+    { date: candidate.service_date, time: candidate.time_slot, serviceId: candidate.service_id },
+    sameDay.map((job) => ({ id: job.id, date: job.service_date, time: job.time_slot, serviceId: job.service_id })),
+  );
+  return conflict ? { bookingId: conflict.id, time: conflict.time, serviceId: conflict.serviceId } : null;
+}
 
 export {
   addDaysToDateString,
@@ -2057,6 +2089,12 @@ export function acceptBookingRequest(
       };
     }
 
+    // AI-02A: not within 60 minutes of another job this cleaner has that day.
+    if (findCleanerTravelConflict(cleanerId, bookingId)) {
+      database.exec("ROLLBACK;");
+      return { success: false, error: TRAVEL_TIME_BLOCKED_MESSAGE };
+    }
+
     database
       .prepare(
         `UPDATE bookings
@@ -3462,8 +3500,16 @@ export type NoShowAlert = {
   replacements: ReplacementCleaner[];
 };
 
-/** US-09: active cleaners who work on `date`'s weekday, except `excludeId`. */
-export function listReplacementCleaners(date: string, excludeId: string): ReplacementCleaner[] {
+/**
+ * US-09: active cleaners who work on `date`'s weekday, except `excludeId`.
+ * AI-02A: with `bookingId`, also leaves out cleaners who'd have less than 60
+ * minutes between that job and another of theirs on the same day.
+ */
+export function listReplacementCleaners(
+  date: string,
+  excludeId: string,
+  bookingId?: string,
+): ReplacementCleaner[] {
   const weekday = getDayOfWeekFromDateString(date);
   const rows = getDatabase()
     .prepare(
@@ -3476,6 +3522,7 @@ export function listReplacementCleaners(date: string, excludeId: string): Replac
     .all(excludeId) as Array<{ id: string; name: string; available_days: string }>;
   return rows
     .filter((row) => parseWeekdays(row.available_days).includes(weekday))
+    .filter((row) => !bookingId || !findCleanerTravelConflict(row.id, bookingId))
     .map(({ id, name }) => ({ id, name }));
 }
 
@@ -3532,7 +3579,7 @@ export function getNoShowAlerts(): { open: NoShowAlert[]; resolved: NoShowAlert[
     resolvedBy: row.resolved_by ?? null,
     reassignedToName: row.reassigned_to_name ?? null,
     replacements:
-      row.status === "open" ? listReplacementCleaners(row.service_date, row.cleaner_id) : [],
+      row.status === "open" ? listReplacementCleaners(row.service_date, row.cleaner_id, row.booking_id) : [],
   });
 
   const open = database
@@ -3602,7 +3649,7 @@ export function resolveNoShowAlert(
       database.exec("ROLLBACK;");
       return { status: "booking-completed" };
     }
-    const replacement = listReplacementCleaners(booking.service_date, alert.cleaner_id).find(
+    const replacement = listReplacementCleaners(booking.service_date, alert.cleaner_id, alert.booking_id).find(
       (cleaner) => cleaner.id === action.cleanerId,
     );
     if (!replacement) {
@@ -3683,13 +3730,13 @@ export function getReassignOptions(bookingId: string, now: Date = new Date()): R
       time: booking.time_slot,
       currentCleanerName: booking.accepted_by_name,
     },
-    cleaners: listReplacementCleaners(booking.service_date, booking.accepted_by_id ?? ""),
+    cleaners: listReplacementCleaners(booking.service_date, booking.accepted_by_id ?? "", booking.id),
   };
 }
 
 export type ReassignBookingResult =
   | { status: "ok"; cleanerName: string; previousCleanerName: string | null }
-  | { status: "not-found" | "booking-completed" | "booking-past" | "invalid-cleaner" };
+  | { status: "not-found" | "booking-completed" | "booking-past" | "invalid-cleaner" | "travel-time" };
 
 /**
  * US-10: assigns an upcoming booking to another active cleaner who works that
@@ -3708,7 +3755,9 @@ export function reassignBooking(
   database.exec("BEGIN IMMEDIATE;");
   try {
     const booking = loadReassignableBooking(bookingId);
-    const fail = (status: "not-found" | "booking-completed" | "booking-past" | "invalid-cleaner") => {
+    const fail = (
+      status: "not-found" | "booking-completed" | "booking-past" | "invalid-cleaner" | "travel-time",
+    ) => {
       database.exec("ROLLBACK;");
       return { status };
     };
@@ -3720,6 +3769,8 @@ export function reassignBooking(
       (item) => item.id === cleanerId,
     );
     if (!cleaner) return fail("invalid-cleaner");
+    // AI-02A: the new cleaner needs 60 minutes between this and their other jobs that day.
+    if (findCleanerTravelConflict(cleaner.id, bookingId)) return fail("travel-time");
 
     const assignedAt = now.toISOString();
     const openAlert = database
