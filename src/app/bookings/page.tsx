@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -28,6 +28,7 @@ import {
 import { RecurringPlans } from "../components/recurring-plans";
 import { RecommendedCleaner } from "../components/recommended-cleaner";
 import { ReviewTagList, ReviewTagPicker } from "../components/review-tags";
+import { findBookingFormProblem } from "@/lib/booking-form";
 import type { ReviewTag } from "@/lib/review-tags";
 
 function dateString(value: Date) {
@@ -94,6 +95,17 @@ export default function CustomerBookingsPage() {
   const [specialInstructions, setSpecialInstructions] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingFormError, setBookingFormError] = useState("");
+  // Bug Card 1: the address field shows its own message, right under the input.
+  const [addressError, setAddressError] = useState("");
+  const addressInputRef = useRef<HTMLInputElement>(null);
+  const formErrorRef = useRef<HTMLDivElement>(null);
+
+  // Bug Card 1: the form is long, so bring a new error message into view.
+  useEffect(() => {
+    if (bookingFormError) {
+      formErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [bookingFormError]);
   const [days, setDays] = useState<AvailableDay[]>([]);
 
   const selectedService = SERVICES.find((service) => service.id === serviceId) ?? SERVICES[0];
@@ -291,18 +303,18 @@ export default function CustomerBookingsPage() {
     setBookingFormError("");
     setBookingSuccessMsg("");
 
-    if (!date || (minimumDate && date < minimumDate)) {
-      setBookingFormError("Start date cannot be in the past.");
+    setAddressError("");
+
+    // Bug Card 1: Confirm stays clickable, so a missing field gets a message
+    // instead of a silently greyed-out button.
+    const problem = findBookingFormProblem({ date, time, address, minimumDate });
+    if (problem?.field === "address") {
+      setAddressError(problem.message);
+      addressInputRef.current?.focus();
       return;
     }
-
-    if (!time) {
-      setBookingFormError("Please choose an arrival time slot.");
-      return;
-    }
-
-    if (!address.trim()) {
-      setBookingFormError("Please enter your cleaning address.");
+    if (problem) {
+      setBookingFormError(problem.message);
       return;
     }
 
@@ -655,9 +667,9 @@ export default function CustomerBookingsPage() {
             {activeTab === "book-new" ? (
               <section id="panel-book-new" role="tabpanel" className="tab-panel">
                 <div style={{ maxWidth: "760px", margin: "0 auto" }}>
-                  <form onSubmit={handleCreateBooking} className="booking-form">
+                  <form onSubmit={handleCreateBooking} className="booking-form" noValidate>
                     {bookingFormError ? (
-                      <div className="form-error" role="alert" style={{ marginBottom: "20px" }}>
+                      <div ref={formErrorRef} className="form-error" role="alert" style={{ marginBottom: "20px" }}>
                         {bookingFormError}
                       </div>
                     ) : null}
@@ -839,11 +851,28 @@ export default function CustomerBookingsPage() {
                         type="text"
                         className="field-input"
                         placeholder="e.g. 123 Maple Street, Apt 4B"
+                        ref={addressInputRef}
                         value={address}
-                        onChange={(e) => setAddress(e.target.value)}
+                        onChange={(e) => {
+                          setAddress(e.target.value);
+                          if (e.target.value.trim()) setAddressError("");
+                        }}
                         required
-                        style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #ccc" }}
+                        aria-required="true"
+                        aria-invalid={addressError ? true : undefined}
+                        aria-describedby={addressError ? "booking-address-error" : undefined}
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          borderRadius: "6px",
+                          border: addressError ? "1.5px solid #c0392b" : "1px solid #ccc",
+                        }}
                       />
+                      {addressError ? (
+                        <p id="booking-address-error" className="field-error" role="alert">
+                          {addressError}
+                        </p>
+                      ) : null}
                     </div>
 
                     {/* Step 6: Special instructions (US-13) */}
@@ -898,7 +927,7 @@ export default function CustomerBookingsPage() {
                     <button
                       type="submit"
                       className="confirm-button"
-                      disabled={isSubmitting || !time || !date || !address.trim()}
+                      disabled={isSubmitting}
                       style={{ width: "100%", padding: "14px", fontSize: "16px", fontWeight: 600 }}
                     >
                       {isSubmitting ? "Submitting Booking…" : "Confirm Booking Request"}
