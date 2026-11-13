@@ -3610,3 +3610,120 @@ export function resolveNoShowAlert(
     throw error;
   }
 }
+
+// ---------------------------------------------------------------------------
+// US-10: the admin reassigns any upcoming booking to another available cleaner
+// ---------------------------------------------------------------------------
+
+type ReassignableBookingRow = {
+  id: string;
+  service_date: string;
+  time_slot: string;
+  status: "scheduled" | "completed";
+  accepted_by_id: string | null;
+  accepted_by_name: string | null;
+};
+
+function loadReassignableBooking(bookingId: string) {
+  return getDatabase()
+    .prepare(
+      `SELECT id, service_date, time_slot, status, accepted_by_id, accepted_by_name
+       FROM bookings WHERE id = ?`,
+    )
+    .get(bookingId) as ReassignableBookingRow | undefined;
+}
+
+export type ReassignOptions =
+  | {
+      status: "ok";
+      booking: { id: string; date: string; time: string; currentCleanerName: string | null };
+      /** Active cleaners who work that weekday, minus the one already assigned. */
+      cleaners: ReplacementCleaner[];
+    }
+  | { status: "not-found" | "booking-completed" | "booking-past" };
+
+/** US-10: who the admin can move a booking to. */
+export function getReassignOptions(bookingId: string, now: Date = new Date()): ReassignOptions {
+  const booking = loadReassignableBooking(bookingId);
+  if (!booking) return { status: "not-found" };
+  if (booking.status === "completed") return { status: "booking-completed" };
+  if (booking.service_date < bangkokDateString(now)) return { status: "booking-past" };
+  return {
+    status: "ok",
+    booking: {
+      id: booking.id,
+      date: booking.service_date,
+      time: booking.time_slot,
+      currentCleanerName: booking.accepted_by_name,
+    },
+    cleaners: listReplacementCleaners(booking.service_date, booking.accepted_by_id ?? ""),
+  };
+}
+
+export type ReassignBookingResult =
+  | { status: "ok"; cleanerName: string; previousCleanerName: string | null }
+  | { status: "not-found" | "booking-completed" | "booking-past" | "invalid-cleaner" };
+
+/**
+ * US-10: assigns an upcoming booking to another active cleaner who works that
+ * weekday (or assigns an open request nobody has accepted yet). The job moves
+ * to the new cleaner's schedule straight away, because every cleaner view reads
+ * `accepted_by_id`. An open no-show alert for the booking is resolved as
+ * reassigned, the same way US-09 does it, and the new cleaner gets an hour.
+ */
+export function reassignBooking(
+  bookingId: string,
+  cleanerId: string,
+  adminName: string,
+  now: Date = new Date(),
+): ReassignBookingResult {
+  const database = getDatabase();
+  database.exec("BEGIN IMMEDIATE;");
+  try {
+    const booking = loadReassignableBooking(bookingId);
+    const fail = (status: "not-found" | "booking-completed" | "booking-past" | "invalid-cleaner") => {
+      database.exec("ROLLBACK;");
+      return { status };
+    };
+    if (!booking) return fail("not-found");
+    if (booking.status === "completed") return fail("booking-completed");
+    if (booking.service_date < bangkokDateString(now)) return fail("booking-past");
+
+    const cleaner = listReplacementCleaners(booking.service_date, booking.accepted_by_id ?? "").find(
+      (item) => item.id === cleanerId,
+    );
+    if (!cleaner) return fail("invalid-cleaner");
+
+    const assignedAt = now.toISOString();
+    const openAlert = database
+      .prepare("SELECT id FROM no_show_alerts WHERE booking_id = ? AND status = 'open'")
+      .get(bookingId) as { id: string } | undefined;
+    const arriveBy = openAlert
+      ? new Date(now.getTime() + REASSIGNED_ARRIVAL_MINUTES * MINUTE).toISOString()
+      : null;
+
+    database
+      .prepare(
+        `UPDATE bookings
+         SET cleaner_id = ?, accepted_by_id = ?, accepted_by_name = ?, accepted_at = ?,
+             arrived_at = NULL, late_minutes = NULL, arrive_by = ?
+         WHERE id = ?`,
+      )
+      .run(cleaner.id, cleaner.id, cleaner.name, assignedAt, arriveBy, bookingId);
+    if (openAlert) {
+      database
+        .prepare(
+          `UPDATE no_show_alerts
+           SET status = 'resolved', resolution = 'reassigned', resolved_at = ?, resolved_by = ?,
+               reassigned_to_id = ?, reassigned_to_name = ?
+           WHERE id = ?`,
+        )
+        .run(assignedAt, adminName, cleaner.id, cleaner.name, openAlert.id);
+    }
+    database.exec("COMMIT;");
+    return { status: "ok", cleanerName: cleaner.name, previousCleanerName: booking.accepted_by_name };
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+}

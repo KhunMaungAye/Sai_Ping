@@ -24,6 +24,7 @@ import {
 } from "@/lib/cleaner-ratings";
 import { signOut, useSession } from "@/lib/use-session";
 import { NoShowAlertsPanel, NoShowBanner, useNoShowAlerts } from "@/app/components/no-show-alerts";
+import { ReassignControl } from "@/app/components/reassign-control";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -428,6 +429,17 @@ export default function AdminDashboardPage() {
                             {adminCleanerLabel(b)}
                           </span>
                         )}
+                        {b.status === "scheduled" ? (
+                          <ReassignControl
+                            bookingId={b.id}
+                            date={b.date}
+                            hasCleaner={Boolean(b.acceptedByName)}
+                            onDone={(message, isError) => {
+                              setActionMessage(isError ? `Error: ${message}` : message);
+                              if (!isError) setRefresh((v) => v + 1);
+                            }}
+                          />
+                        ) : null}
                       </td>
                       <td>
                         <span
