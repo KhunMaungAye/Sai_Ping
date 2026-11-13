@@ -3536,3 +3536,81 @@ html {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* US-16: feedback tags on ratings, and the rating summary for cleaners and admins */
+.review-tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.review-tag-pill {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.review-tag-pill:hover:not(:disabled) {
+  border-color: var(--brand-blue);
+}
+.review-tag-pill.is-selected {
+  border-color: var(--brand-blue);
+  background: var(--sky);
+  color: var(--brand-blue);
+}
+.review-tag-pill:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.review-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+}
+.review-tag-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--sky);
+  color: var(--brand-blue);
+  font-size: 12px;
+  font-weight: 700;
+}
+.review-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+.review-summary-score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.review-summary-score strong {
+  color: var(--navy);
+  font-size: 32px;
+  line-height: 1;
+}
+.review-summary-score span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.review-stars {
+  color: #f0b400;
+  letter-spacing: 1px;
+}
+.review-stars-empty {
+  color: var(--line);
+}

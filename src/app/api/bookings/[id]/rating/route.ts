@@ -3,10 +3,14 @@ import {
   getBookingRatingDetails,
   submitBookingRating,
 } from "../../../../../lib/booking-store.ts";
+import { REVIEW_MAX_LENGTH, parseReviewTags } from "../../../../../lib/review-tags.ts";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-const REVIEW_LIMIT = 1000;
+const REVIEW_LIMIT = REVIEW_MAX_LENGTH;
+
+/** US-16: what the customer sees once the rating is saved. */
+export const RATING_SAVED_MESSAGE = "Thank you! Your rating and review have been saved.";
 
 /** Only the customer who booked (or an admin) may see or rate a booking. */
 function authorize(request: Request, customerEmail: string) {
@@ -80,6 +84,12 @@ export async function POST(request: Request, { params }: RouteContext) {
     );
   }
 
+  // US-16: optional feedback tags such as "Punctual" and "Detailed".
+  const parsedTags = parseReviewTags(record.tags);
+  if (!parsedTags.ok) {
+    return Response.json({ error: parsedTags.error }, { status: 400 });
+  }
+
   const booking = getBookingRatingDetails(id);
   if (!booking) {
     return Response.json({ error: "Booking not found." }, { status: 404 });
@@ -97,7 +107,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   }
 
   try {
-    const result = submitBookingRating(id, stars, review || null);
+    const result = submitBookingRating(id, stars, review || null, parsedTags.tags);
 
     if (result.status === "not-found") {
       return Response.json({ error: "Booking not found." }, { status: 404 });
@@ -116,7 +126,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     }
 
     return Response.json(
-      { stars: result.stars, review: result.review },
+      { stars: result.stars, review: result.review, tags: result.tags, message: RATING_SAVED_MESSAGE },
       { status: 201 },
     );
   } catch {

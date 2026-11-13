@@ -210,6 +210,9 @@ describe("Cleaner availability, job ownership, reviews and admin overview", () =
     assert.deepStrictEqual(await saved.json(), {
       stars: 4,
       review: "Spotless kitchen, arrived on time.",
+      // US-16 added feedback tags and a confirmation message to the reply.
+      tags: [],
+      message: "Thank you! Your rating and review have been saved.",
     });
 
     const again = await call(ratingPOST, ratingUrl, {
