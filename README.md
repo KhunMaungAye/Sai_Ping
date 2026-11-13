@@ -33,6 +33,23 @@ A fresh database has no cleaners, so no days are bookable until a cleaner signs 
 
 To reset all data, stop the server and delete `data/bookings.sqlite*`.
 
+### Demo data
+
+`data/bookings.sqlite` is git-ignored, so everyone's local database is
+separate — nobody shares bookings or accounts over Git. To get a few demo
+accounts and sample bookings without typing them in by hand, run:
+
+```bash
+node scripts/seed-demo-data.mjs
+```
+
+This creates `customer@saiping.com` / `CustomerPassword123!`,
+`cleaner@saiping.com` / `CleanerPassword123!` (works every day) and
+`cleaner2@saiping.com` / `Cleaner2Password123!` (Mon–Fri) — the same
+credentials the automated tests use — plus an open request, an accepted
+booking and a completed, rated one. It's safe to run more than once: it
+skips anything that already exists and never overwrites your own data.
+
 ### Environment variables
 
 None are required locally. See [`.env.example`](.env.example) for the optional ones.
