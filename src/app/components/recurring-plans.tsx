@@ -2,8 +2,15 @@
 
 import { useEffect, useState } from "react";
 import type { CustomerSubscription } from "@/lib/booking-store";
+import { SERVICES, SPECIAL_INSTRUCTIONS_MAX_LENGTH, TIME_SLOTS } from "@/lib/services";
+import { NO_CHANGES_MESSAGE } from "@/lib/subscription-changes";
 
 const MAX_PAUSE_DAYS = 365;
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function formatPrice(cents: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+}
 
 function todayString() {
   const now = new Date();
@@ -35,7 +42,44 @@ function displayTime(value: string) {
 }
 
 type Notice = { tone: "success" | "error"; text: string };
-type PendingConfirm = { action: "skip" | "pause"; body: object; text: string };
+type PlanAction = "skip" | "pause" | "resume" | "update";
+type PendingConfirm = { action: Exclude<PlanAction, "resume">; body: object; text: string };
+
+/** US-04: the editable fields of a plan, as the form holds them. */
+type PlanDraft = {
+  serviceId: string;
+  frequency: string;
+  preferredDay: string;
+  time: string;
+  address: string;
+  specialInstructions: string;
+};
+
+function draftFrom(plan: CustomerSubscription): PlanDraft {
+  return {
+    serviceId: plan.serviceId,
+    frequency: plan.frequency,
+    preferredDay: plan.preferredDay,
+    time: plan.time,
+    address: plan.address,
+    specialInstructions: plan.specialInstructions ?? "",
+  };
+}
+
+/** Only the fields the customer actually changed, so the server changes nothing else. */
+function changedFields(plan: CustomerSubscription, draft: PlanDraft) {
+  const before = draftFrom(plan);
+  const body: Record<string, string> = {};
+  if (draft.serviceId !== before.serviceId) body.serviceId = draft.serviceId;
+  if (draft.frequency !== before.frequency) body.frequency = draft.frequency;
+  if (draft.preferredDay !== before.preferredDay) body.preferredDay = draft.preferredDay;
+  if (draft.time !== before.time) body.time = draft.time;
+  if (draft.address.trim() !== before.address) body.address = draft.address.trim();
+  if (draft.specialInstructions.trim() !== before.specialInstructions.trim()) {
+    body.specialInstructions = draft.specialInstructions.trim();
+  }
+  return body;
+}
 
 /**
  * US-15: the customer's weekly / fortnightly plans with "Skip next date" and a
@@ -118,7 +162,9 @@ function PlanCard({
   const isPaused = plan.status === "paused";
   const [showPausePicker, setShowPausePicker] = useState(false);
   const [resumeDate, setResumeDate] = useState("");
-  const [busy, setBusy] = useState<"" | "skip" | "pause" | "resume">("");
+  const [showEdit, setShowEdit] = useState(false);
+  const [draft, setDraft] = useState<PlanDraft>(() => draftFrom(plan));
+  const [busy, setBusy] = useState<"" | PlanAction>("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
 
@@ -126,7 +172,7 @@ function PlanCard({
   const maxResume = [addDays(today, MAX_PAUSE_DAYS), plan.lastVisitDate ?? addDays(today, MAX_PAUSE_DAYS)].sort()[0];
   const canChange = plan.status !== "cancelled";
 
-  async function send(action: "skip" | "pause" | "resume", body: object = {}) {
+  async function send(action: PlanAction, body: object = {}) {
     setBusy(action);
     setNotice(null);
     setPendingConfirm(null);
@@ -151,9 +197,12 @@ function PlanCard({
         setNotice({ tone: "error", text: data?.error || "Something went wrong. Please try again." });
         return;
       }
+      // AC2/AC3: the confirmation only appears after the server saved the change.
       setNotice({ tone: "success", text: data.message || "Saved." });
       setShowPausePicker(false);
       setResumeDate("");
+      setShowEdit(false);
+      setDraft(draftFrom(data.subscription));
       onUpdated(data.subscription);
     } catch {
       setNotice({ tone: "error", text: "Could not reach the server. Please try again." });
@@ -177,8 +226,36 @@ function PlanCard({
       void send("resume");
     } else {
       setNotice(null);
+      setShowEdit(false);
       setShowPausePicker((open) => !open);
     }
+  }
+
+  function toggleEdit() {
+    if (busy) return;
+    setNotice(null);
+    setPendingConfirm(null);
+    setShowPausePicker(false);
+    setDraft(draftFrom(plan));
+    setShowEdit((open) => !open);
+  }
+
+  function submitEdit() {
+    const body = changedFields(plan, draft);
+    if (Object.keys(body).length === 0) {
+      setNotice({ tone: "error", text: NO_CHANGES_MESSAGE });
+      return;
+    }
+    if ("address" in body && body.address.length < 5) {
+      setNotice({ tone: "error", text: "Enter the full service address." });
+      return;
+    }
+    void send("update", body);
+  }
+
+  function setField(field: keyof PlanDraft, value: string) {
+    setDraft((current) => ({ ...current, [field]: value }));
+    setNotice(null);
   }
 
   const statusLabel = isPaused ? "Paused" : plan.status === "cancelled" ? "Cancelled" : "Active";
@@ -222,6 +299,17 @@ function PlanCard({
             title={isPaused ? "Resume the plan to skip a single visit" : undefined}
           >
             {busy === "skip" ? "Skipping…" : "Skip next date"}
+          </button>
+
+          <button
+            type="button"
+            className="plan-edit-button"
+            aria-expanded={showEdit}
+            aria-controls={`plan-edit-${plan.id}`}
+            disabled={!plan.nextVisit || busy !== ""}
+            onClick={toggleEdit}
+          >
+            {showEdit ? "Close editor" : "Edit plan"}
           </button>
 
           <label className="plan-toggle">
@@ -290,6 +378,128 @@ function PlanCard({
         </form>
       ) : null}
 
+      {showEdit ? (
+        <form
+          id={`plan-edit-${plan.id}`}
+          className="plan-edit-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitEdit();
+          }}
+        >
+          <p className="plan-hint">
+            Changes apply to your upcoming visits. Past and completed cleanings stay as they were.
+          </p>
+          <div className="plan-edit-grid">
+            <label className="auth-field">
+              <span className="field-label">Service</span>
+              <select
+                className="text-input"
+                value={draft.serviceId}
+                onChange={(e) => setField("serviceId", e.target.value)}
+              >
+                {SERVICES.map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name} · {formatPrice(service.priceCents)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="auth-field">
+              <span className="field-label">How often</span>
+              <select
+                className="text-input"
+                value={draft.frequency}
+                disabled={isPaused}
+                onChange={(e) => setField("frequency", e.target.value)}
+              >
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Every 2 weeks</option>
+              </select>
+            </label>
+
+            <label className="auth-field">
+              <span className="field-label">Day</span>
+              <select
+                className="text-input"
+                value={draft.preferredDay}
+                disabled={isPaused}
+                onChange={(e) => setField("preferredDay", e.target.value)}
+              >
+                {WEEKDAYS.map((day) => (
+                  <option key={day} value={day}>
+                    {day}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="auth-field">
+              <span className="field-label">Arrival time</span>
+              <select
+                className="text-input"
+                value={draft.time}
+                disabled={isPaused}
+                onChange={(e) => setField("time", e.target.value)}
+              >
+                {TIME_SLOTS.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {displayTime(slot)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="auth-field plan-edit-wide">
+              <span className="field-label">Service address</span>
+              <input
+                type="text"
+                className="text-input"
+                value={draft.address}
+                maxLength={300}
+                autoComplete="street-address"
+                onChange={(e) => setField("address", e.target.value)}
+              />
+            </label>
+
+            <label className="auth-field plan-edit-wide">
+              <span className="field-label">Special instructions (optional)</span>
+              <textarea
+                className="text-input"
+                rows={3}
+                value={draft.specialInstructions}
+                maxLength={SPECIAL_INSTRUCTIONS_MAX_LENGTH}
+                onChange={(e) => setField("specialInstructions", e.target.value)}
+              />
+              <span className="plan-edit-count">
+                {draft.specialInstructions.length}/{SPECIAL_INSTRUCTIONS_MAX_LENGTH}
+              </span>
+            </label>
+          </div>
+
+          {isPaused ? (
+            <p className="plan-hint">Resume the plan to change its day, time or how often it repeats.</p>
+          ) : null}
+
+          <div className="plan-pause-buttons">
+            <button type="submit" className="sunny-button small" disabled={busy !== ""}>
+              {busy === "update" ? "Saving…" : "Save changes"}
+            </button>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                setShowEdit(false);
+                setNotice(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       {pendingConfirm ? (
         <div className="plan-warning" role="alert">
           <span>{pendingConfirm.text}</span>
@@ -300,7 +510,11 @@ function PlanCard({
               disabled={busy !== ""}
               onClick={() => void send(pendingConfirm.action, pendingConfirm.body)}
             >
-              {pendingConfirm.action === "skip" ? "Skip anyway" : "Pause anyway"}
+              {pendingConfirm.action === "skip"
+                ? "Skip anyway"
+                : pendingConfirm.action === "update"
+                  ? "Change anyway"
+                  : "Pause anyway"}
             </button>
             <button type="button" className="text-button" onClick={() => setPendingConfirm(null)}>
               Go back
