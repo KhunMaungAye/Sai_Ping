@@ -8,6 +8,7 @@ import {
   CANCELLATION_NOTICE_HOURS,
   getServiceStartTime,
   isWithinCancellationWindow,
+  parseSpecialInstructions,
   type BookingTime,
   type ServiceId,
 } from "./services.ts";
@@ -526,6 +527,22 @@ function initDatabaseSchema(database: DatabaseSync) {
   `);
   database.exec(
     "CREATE INDEX IF NOT EXISTS idx_no_show_alerts_status ON no_show_alerts (status, detected_at);",
+  );
+
+  // US-08: one row per admin change to a booking, so the admin can see what
+  // was changed, when and by whom.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS booking_admin_changes (
+      id TEXT PRIMARY KEY,
+      booking_id TEXT NOT NULL,
+      admin_id TEXT NOT NULL,
+      admin_name TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      changed_at TEXT NOT NULL
+    );
+  `);
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_booking_admin_changes_booking ON booking_admin_changes (booking_id, changed_at);",
   );
 }
 
@@ -2371,8 +2388,19 @@ export function getBookingAssignment(
     : null;
 }
 
+export type AdminBooking = CustomerBooking & { customerName: string };
+
 /** US-17A: every booking for the admin Bookings tab, sorted by date, then time slot. */
-export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: string }> {
+export function getAllBookingsAdmin(): AdminBooking[] {
+  return readAdminBookings("", []);
+}
+
+/** US-08: one booking in the admin shape, or null when it doesn't exist. */
+export function getAdminBooking(id: string): AdminBooking | null {
+  return readAdminBookings("WHERE bookings.id = ?", [id])[0] ?? null;
+}
+
+function readAdminBookings(where: string, params: string[]): AdminBooking[] {
   const database = getDatabase();
   const rows = database
     .prepare(
@@ -2400,9 +2428,10 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
       FROM bookings
       JOIN cleaners ON cleaners.id = bookings.cleaner_id
       LEFT JOIN ratings ON ratings.booking_id = bookings.id
+      ${where}
       ORDER BY bookings.service_date ASC, bookings.time_slot ASC`
     )
-    .all() as Array<{
+    .all(...params) as Array<{
       id: string;
       name: string;
       email: string;
@@ -2452,6 +2481,271 @@ export function getAllBookingsAdmin(): Array<CustomerBooking & { customerName: s
     review: row.review ?? null,
     isUpcoming: row.status === "scheduled" && row.service_date >= today,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// US-08: the admin manages customer bookings (details and service status).
+// Changing which cleaner does a job is US-10, so it isn't done here.
+// ---------------------------------------------------------------------------
+
+export const ADMIN_ADDRESS_MIN_LENGTH = 5;
+export const ADMIN_ADDRESS_MAX_LENGTH = 300;
+export const ADMIN_CHANGE_HISTORY_LIMIT = 20;
+
+export type AdminBookingChanges = {
+  address?: unknown;
+  specialInstructions?: unknown;
+  date?: unknown;
+  time?: unknown;
+  status?: unknown;
+};
+
+export type AdminBookingChange = {
+  id: string;
+  adminName: string;
+  summary: string;
+  changedAt: string;
+};
+
+export type AdminUpdateBookingResult =
+  | { status: "updated"; booking: AdminBooking; changes: string[] }
+  | { status: "unchanged"; booking: AdminBooking }
+  | { status: "not-found" }
+  | { status: "invalid"; error: string }
+  | { status: "conflict"; error: string };
+
+/** Recent admin changes to one booking, newest first. */
+export function getAdminBookingChanges(bookingId: string): AdminBookingChange[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT id, admin_name, summary, changed_at
+       FROM booking_admin_changes
+       WHERE booking_id = ?
+       ORDER BY changed_at DESC, rowid DESC
+       LIMIT ?`,
+    )
+    .all(bookingId, ADMIN_CHANGE_HISTORY_LIMIT) as Array<{
+    id: string;
+    admin_name: string;
+    summary: string;
+    changed_at: string;
+  }>;
+  return rows.map((row) => ({
+    id: row.id,
+    adminName: row.admin_name,
+    summary: row.summary,
+    changedAt: row.changed_at,
+  }));
+}
+
+type AdminEditableRow = {
+  id: string;
+  service_date: string;
+  time_slot: string;
+  address: string;
+  special_instructions: string | null;
+  status: "scheduled" | "completed";
+  accepted_by_id: string | null;
+  arrived_at: string | null;
+  rating_id: string | null;
+};
+
+/**
+ * Applies an admin's changes to one booking in a single transaction: either
+ * every change is saved (with one history row) or none is. Fields left out of
+ * `changes` are not touched.
+ *
+ * Rules:
+ * - address: 5–300 characters; special instructions: up to 250, empty clears.
+ * - date/time: only for a scheduled visit the cleaner hasn't checked in to.
+ *   The new arrival window must be today or later (Bangkok), not already
+ *   started, on a day a cleaner works, and free. If a cleaner has accepted
+ *   the job, they must work the new weekday (otherwise reassign first, US-10).
+ * - status: "completed" needs an accepted cleaner and a visit that has
+ *   started; "scheduled" (undoing a completion) is refused once rated.
+ */
+export function adminUpdateBooking(
+  id: string,
+  changes: AdminBookingChanges,
+  admin: { id: string; name: string },
+  now: Date = new Date(),
+): AdminUpdateBookingResult {
+  const database = getDatabase();
+  return withTransaction(() => {
+    const row = database
+      .prepare(
+        `SELECT bookings.id, bookings.service_date, bookings.time_slot, bookings.address,
+                bookings.special_instructions, bookings.status, bookings.accepted_by_id,
+                bookings.arrived_at, ratings.id AS rating_id
+         FROM bookings
+         LEFT JOIN ratings ON ratings.booking_id = bookings.id
+         WHERE bookings.id = ?`,
+      )
+      .get(id) as AdminEditableRow | undefined;
+    if (!row) return { status: "not-found" as const };
+
+    const summary: string[] = [];
+    let address = row.address;
+    let instructions = row.special_instructions;
+    let date = row.service_date;
+    let time = row.time_slot;
+    let status = row.status;
+
+    if (changes.address !== undefined) {
+      if (typeof changes.address !== "string") {
+        return { status: "invalid" as const, error: "The address must be text." };
+      }
+      const next = changes.address.trim().replace(/\s+/g, " ");
+      if (next.length < ADMIN_ADDRESS_MIN_LENGTH || next.length > ADMIN_ADDRESS_MAX_LENGTH) {
+        return {
+          status: "invalid" as const,
+          error: `The address must be ${ADMIN_ADDRESS_MIN_LENGTH} to ${ADMIN_ADDRESS_MAX_LENGTH} characters.`,
+        };
+      }
+      if (next !== address) {
+        address = next;
+        summary.push("Address updated");
+      }
+    }
+
+    if (changes.specialInstructions !== undefined) {
+      const parsed = parseSpecialInstructions(changes.specialInstructions);
+      if (!parsed.ok) return { status: "invalid" as const, error: parsed.error };
+      if (parsed.value !== (instructions ?? null)) {
+        instructions = parsed.value;
+        summary.push(parsed.value ? "Special instructions updated" : "Special instructions cleared");
+      }
+    }
+
+    if (changes.status !== undefined) {
+      if (changes.status !== "scheduled" && changes.status !== "completed") {
+        return { status: "invalid" as const, error: "Status must be Scheduled or Completed." };
+      }
+      status = changes.status;
+    }
+
+    const wantsDate = changes.date !== undefined || changes.time !== undefined;
+    if (wantsDate) {
+      const nextDate = changes.date === undefined ? date : changes.date;
+      const nextTime = changes.time === undefined ? time : changes.time;
+      if (typeof nextDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(nextDate) ||
+          Number.isNaN(getServiceStartTime(nextDate, "09:00").getTime()) ||
+          new Date(`${nextDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== nextDate) {
+        return { status: "invalid" as const, error: "Choose a valid date." };
+      }
+      if (typeof nextTime !== "string" || !TIME_SLOTS.some((slot) => slot === nextTime)) {
+        return {
+          status: "invalid" as const,
+          error: `Choose an arrival window: ${TIME_SLOTS.join(" or ")}.`,
+        };
+      }
+      if (nextDate !== date || nextTime !== time) {
+        if (row.status === "completed" || status === "completed") {
+          return {
+            status: "conflict" as const,
+            error: "A completed booking can't be moved to another date.",
+          };
+        }
+        if (row.arrived_at) {
+          return {
+            status: "conflict" as const,
+            error: "The cleaner has already checked in, so this visit can't be moved.",
+          };
+        }
+        if (nextDate < bangkokDateString(now) || getServiceStartTime(nextDate, nextTime) <= now) {
+          return {
+            status: "invalid" as const,
+            error: "Choose an arrival window that hasn't started yet.",
+          };
+        }
+        const weekday = getDayOfWeekFromDateString(nextDate);
+        if (!getServicedWeekdays().has(weekday)) {
+          return { status: "conflict" as const, error: "No cleaner works on that day." };
+        }
+        if (row.accepted_by_id && !getCleanerAvailableDays(row.accepted_by_id).includes(weekday)) {
+          return {
+            status: "conflict" as const,
+            error: "The assigned cleaner doesn't work on that day. Reassign the job first.",
+          };
+        }
+        const taken = database
+          .prepare("SELECT id FROM bookings WHERE service_date = ? AND time_slot = ? AND id <> ?")
+          .get(nextDate, nextTime, id);
+        if (taken) {
+          return {
+            status: "conflict" as const,
+            error: "That arrival window is already booked. Choose another.",
+          };
+        }
+        date = nextDate;
+        time = nextTime;
+        summary.push(`Moved from ${row.service_date} ${row.time_slot} to ${date} ${time}`);
+      }
+    }
+
+    if (status !== row.status) {
+      if (status === "completed") {
+        if (!row.accepted_by_id) {
+          return {
+            status: "conflict" as const,
+            error: "No cleaner has accepted this booking yet, so it can't be completed.",
+          };
+        }
+        if (getServiceStartTime(date, time) > now) {
+          return {
+            status: "conflict" as const,
+            error: "A visit can't be marked completed before it starts.",
+          };
+        }
+        summary.push("Status changed to Completed");
+      } else {
+        if (row.rating_id) {
+          return {
+            status: "conflict" as const,
+            error: "The customer has already rated this cleaning, so it stays Completed.",
+          };
+        }
+        summary.push("Status changed to Scheduled");
+      }
+    }
+
+    if (summary.length === 0) {
+      return { status: "unchanged" as const, booking: getAdminBooking(id)! };
+    }
+
+    const moved = date !== row.service_date || time !== row.time_slot;
+    database
+      .prepare(
+        `UPDATE bookings
+         SET address = ?, special_instructions = ?, service_date = ?, time_slot = ?, status = ?,
+             cleaner_id = CASE WHEN ? = 'completed' AND accepted_by_id IS NOT NULL THEN accepted_by_id ELSE cleaner_id END,
+             late_minutes = CASE WHEN ? THEN NULL ELSE late_minutes END,
+             arrive_by = CASE WHEN ? THEN NULL ELSE arrive_by END
+         WHERE id = ?`,
+      )
+      .run(address, instructions, date, time, status, status, moved ? 1 : 0, moved ? 1 : 0, id);
+
+    // A US-09 no-show alert is about the old arrival time (moved) or is
+    // settled by the job being done (completed).
+    if (moved || status === "completed") {
+      database
+        .prepare(
+          `UPDATE no_show_alerts
+           SET status = 'resolved', resolution = ?, resolved_at = ?, resolved_by = ?
+           WHERE booking_id = ? AND status = 'open'`,
+        )
+        .run(status === "completed" ? "job-completed" : "resolved", now.toISOString(), admin.id, id);
+    }
+
+    database
+      .prepare(
+        `INSERT INTO booking_admin_changes (id, booking_id, admin_id, admin_name, summary, changed_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), id, admin.id, admin.name, summary.join("; "), now.toISOString());
+
+    return { status: "updated" as const, booking: getAdminBooking(id)!, changes: summary };
+  });
 }
 
 export function getPlatformStats(): {

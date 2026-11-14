@@ -57,3 +57,34 @@ export function adminCleanerLabel(booking: { acceptedByName?: string | null }): 
   const name = booking.acceptedByName?.trim();
   return name ? name : NOT_ACCEPTED_LABEL;
 }
+
+/**
+ * US-08: bookings whose reference, customer, email, address, service or
+ * cleaner contains the search text (case-insensitive). Empty text matches all.
+ * A reference can be typed with or without a leading "#".
+ */
+export function searchAdminBookings<
+  T extends {
+    id: string;
+    name: string;
+    email: string;
+    address: string;
+    serviceName: string;
+    acceptedByName?: string | null;
+  },
+>(bookings: readonly T[], query: string): T[] {
+  const needle = query.trim().replace(/^#/, "").toLowerCase();
+  if (!needle) return [...bookings];
+  return bookings.filter((booking) =>
+    [
+      booking.id,
+      booking.name,
+      booking.email,
+      booking.address,
+      booking.serviceName,
+      booking.acceptedByName ?? "",
+    ].some((value) => value.toLowerCase().includes(needle)),
+  );
+}
+
+export const NO_SEARCH_RESULTS_MESSAGE = "No bookings match your search";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type {
   AdminCleanerSummary,
@@ -13,10 +13,13 @@ import {
   type BookingStatusFilter,
   BOOKING_STATUS_FILTERS,
   NO_MATCHING_BOOKINGS_MESSAGE,
+  NO_SEARCH_RESULTS_MESSAGE,
   adminCleanerLabel,
   countBookingsByStatus,
   filterAdminBookings,
+  searchAdminBookings,
 } from "@/lib/admin-bookings";
+import { AdminBookingManager } from "@/app/components/admin-booking-manager";
 import {
   type CleanerRatingSort,
   formatAverageRating,
@@ -84,6 +87,8 @@ export default function AdminDashboardPage() {
   });
   const [bookings, setBookings] = useState<AdminBooking[]>([]);
   const [bookingFilter, setBookingFilter] = useState<BookingStatusFilter>("all");
+  const [bookingSearch, setBookingSearch] = useState("");
+  const [managedBookingId, setManagedBookingId] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [actionMessage, setActionMessage] = useState("");
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
@@ -164,8 +169,17 @@ export default function AdminDashboardPage() {
   const handleSignOut = signOut;
 
   // US-17A: status filter on the Bookings tab, sorted by date, then time slot.
-  const visibleBookings = filterAdminBookings(bookings, bookingFilter);
-  const bookingCounts = countBookingsByStatus(bookings);
+  // US-08: the search box narrows the list first, so the counts match what is searched.
+  const searchedBookings = searchAdminBookings(bookings, bookingSearch);
+  const visibleBookings = filterAdminBookings(searchedBookings, bookingFilter);
+  const bookingCounts = countBookingsByStatus(searchedBookings);
+
+  const closeManager = useCallback(() => setManagedBookingId(null), []);
+  const handleBookingSaved = useCallback((saved: AdminBooking, message: string) => {
+    setBookings((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+    setActionMessage(message);
+    setRefresh((value) => value + 1);
+  }, []);
 
   if (session.status === "error") {
     return (
@@ -359,6 +373,17 @@ export default function AdminDashboardPage() {
         {/* Panel 1: All Bookings Table with Cleaner Acceptance Information */}
         {activeTab === "bookings" ? (
           <section className="tab-panel">
+            <div className="booking-search">
+              <label htmlFor="booking-search-input">Search bookings</label>
+              <input
+                id="booking-search-input"
+                className="text-input"
+                type="search"
+                value={bookingSearch}
+                placeholder="Reference, customer, email, address or cleaner"
+                onChange={(event) => setBookingSearch(event.target.value)}
+              />
+            </div>
             <div className="booking-filter-bar" role="group" aria-label="Filter bookings by status">
               {BOOKING_STATUS_FILTERS.map((option) => (
                 <button
@@ -384,6 +409,9 @@ export default function AdminDashboardPage() {
                     <th>Price</th>
                     <th>Cleaner</th>
                     <th>Service Status</th>
+                    <th>
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -456,12 +484,26 @@ export default function AdminDashboardPage() {
                           {b.statusLabel}
                         </span>
                       </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="manage-booking-button"
+                          aria-label={`Manage booking ${b.id.slice(0, 8).toUpperCase()}`}
+                          onClick={() => setManagedBookingId(b.id)}
+                        >
+                          Manage
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {visibleBookings.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
-                        {bookings.length === 0 ? "No bookings on file." : NO_MATCHING_BOOKINGS_MESSAGE}
+                      <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
+                        {bookings.length === 0
+                          ? "No bookings on file."
+                          : searchedBookings.length === 0
+                            ? NO_SEARCH_RESULTS_MESSAGE
+                            : NO_MATCHING_BOOKINGS_MESSAGE}
                       </td>
                     </tr>
                   ) : null}
@@ -754,6 +796,14 @@ export default function AdminDashboardPage() {
           </section>
         ) : null}
       </div>
+      {managedBookingId ? (
+        <AdminBookingManager
+          key={managedBookingId}
+          bookingId={managedBookingId}
+          onClose={closeManager}
+          onSaved={handleBookingSaved}
+        />
+      ) : null}
     </main>
   );
 }
