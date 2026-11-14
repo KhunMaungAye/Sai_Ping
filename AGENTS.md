@@ -69,6 +69,8 @@ src/lib/auth.ts                   Password hashing, sessions, cookies, role guar
 src/lib/use-session.ts            Client hook: current user + role redirects
 src/lib/services.ts               Service packages, prices, TIME_SLOTS
 src/lib/date-utils.ts             UTC-safe YYYY-MM-DD helpers
+src/lib/shift-draft.ts            AI-02B weekly shift draft (its own two tables, created on first use)
+src/lib/shift-rules.ts            AI-02B job hours, 35-hour cap, travel-time rule (stand-in for AI-02A)
 tests/                            node:test suites; tests/helpers/seed-test-users.mjs
 ```
 
