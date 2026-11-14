@@ -94,6 +94,17 @@ export type Booking = BookingInput & {
   createdAt: string;
   cleanerName: string;
   subscriptionId?: string | null;
+  /** AI-01B: the cleaner the booking was assigned to when it was made, if any. */
+  acceptedById?: string | null;
+  acceptedByName?: string | null;
+};
+
+/** AI-01B: options for booking the recommended cleaner directly. */
+export type CreateBookingOptions = {
+  /** Assign the booking to this cleaner straight away, if they are still free. */
+  assignTo?: string | null;
+  /** Repeat requests with the same id return the first booking (double clicks). */
+  requestId?: string | null;
 };
 
 export type CustomerBooking = {
@@ -333,6 +344,14 @@ function initDatabaseSchema(database: DatabaseSync) {
   if (!bookingColumns.some((column) => column.name === "special_instructions")) {
     database.exec("ALTER TABLE bookings ADD COLUMN special_instructions TEXT;");
   }
+  // AI-01B: the booking form sends a request id so a double click on
+  // "Book with [name]" saves one booking, not two.
+  if (!bookingColumns.some((column) => column.name === "request_id")) {
+    database.exec("ALTER TABLE bookings ADD COLUMN request_id TEXT;");
+  }
+  database.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_request_id ON bookings (request_id) WHERE request_id IS NOT NULL;",
+  );
 
   const cleanerColumns = database
     .prepare("PRAGMA table_info(cleaners)")
@@ -755,7 +774,14 @@ function toSubscription(
   };
 }
 
-export function createBooking(input: BookingInput) {
+/**
+ * Saves a one-time booking. With `options.assignTo` (AI-01B "Book with [name]"),
+ * the booking is assigned to that cleaner in the same transaction if they can
+ * still take it: an active cleaner account who works that weekday and has no
+ * other job in that slot. Otherwise it is saved as an open request and
+ * `cleanerUnavailable` is true.
+ */
+export function createBooking(input: BookingInput, options: CreateBookingOptions = {}) {
   const database = getDatabase();
   const service = SERVICES.find((item) => item.id === input.serviceId);
   const cleaner = database
@@ -770,6 +796,32 @@ export function createBooking(input: BookingInput) {
 
   database.exec("BEGIN IMMEDIATE;");
   try {
+    const requestId = options.requestId?.trim() || null;
+    if (requestId) {
+      const earlier = database
+        .prepare(
+          `SELECT bookings.*, cleaners.name AS cleaner_name
+           FROM bookings JOIN cleaners ON cleaners.id = bookings.cleaner_id
+           WHERE bookings.request_id = ?`,
+        )
+        .get(requestId) as (StoredBooking & { accepted_by_id: string | null; accepted_by_name: string | null }) | undefined;
+      if (earlier) {
+        database.exec("ROLLBACK;");
+        if (earlier.email.toLowerCase() !== input.email.toLowerCase()) {
+          return { status: "unavailable" as const };
+        }
+        return {
+          status: "duplicate" as const,
+          booking: {
+            ...toBooking(earlier),
+            acceptedById: earlier.accepted_by_id ?? null,
+            acceptedByName: earlier.accepted_by_name ?? null,
+          },
+          cleanerUnavailable: false,
+        };
+      }
+    }
+
     if (!isServiceDayAvailable(input.date)) {
       database.exec("ROLLBACK;");
       return { status: "no-cleaner" as const };
@@ -786,14 +838,18 @@ export function createBooking(input: BookingInput) {
       return { status: "unavailable" as const };
     }
 
+    const assigned = options.assignTo
+      ? findAssignableCleaner(options.assignTo, input.date, input.time)
+      : null;
+
     database
       .prepare(
         `
         INSERT INTO bookings (
           id, name, email, service_id, service_name, price_cents,
           service_date, time_slot, address, special_instructions, created_at,
-          cleaner_id, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')
+          cleaner_id, status, accepted_by_id, accepted_by_name, accepted_at, request_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?)
       `,
       )
       .run(
@@ -808,7 +864,11 @@ export function createBooking(input: BookingInput) {
         input.address,
         input.specialInstructions ?? null,
         createdAt,
-        cleaner.id,
+        assigned?.id ?? cleaner.id,
+        assigned?.id ?? null,
+        assigned?.name ?? null,
+        assigned ? createdAt : null,
+        requestId,
       );
 
     database.exec("COMMIT;");
@@ -821,13 +881,45 @@ export function createBooking(input: BookingInput) {
         serviceName: service.name,
         priceCents: service.priceCents,
         createdAt,
-        cleanerName: cleaner.name,
+        cleanerName: assigned?.name ?? cleaner.name,
+        acceptedById: assigned?.id ?? null,
+        acceptedByName: assigned?.name ?? null,
       },
+      cleanerUnavailable: Boolean(options.assignTo) && !assigned,
     };
   } catch (error) {
     database.exec("ROLLBACK;");
     throw error;
   }
+}
+
+/**
+ * AI-01B: the cleaner (id and name) if they can take a job on `date` at
+ * `time` right now: an active cleaner account that works that weekday and has
+ * no other job in that slot. Same eligibility as the AI-01A recommendation.
+ */
+function findAssignableCleaner(
+  cleanerId: string,
+  date: string,
+  time: BookingTime,
+): { id: string; name: string } | null {
+  const row = getDatabase()
+    .prepare(
+      `SELECT cleaners.id, users.name, cleaners.available_days,
+              (SELECT COUNT(*) FROM bookings b
+                WHERE b.accepted_by_id = cleaners.id
+                  AND b.service_date = ? AND b.time_slot = ?) AS jobs_in_slot
+       FROM users
+       JOIN cleaners ON cleaners.id = users.cleaner_id
+       WHERE cleaners.id = ? AND users.role = 'cleaner' AND users.status = 'active'`,
+    )
+    .get(date, time, cleanerId) as
+    | { id: string; name: string; available_days: string; jobs_in_slot: number }
+    | undefined;
+  if (!row) return null;
+  if (!parseWeekdays(row.available_days).includes(getDayOfWeekFromDateString(date))) return null;
+  if (row.jobs_in_slot > 0) return null;
+  return { id: row.id, name: row.name };
 }
 
 export function createRecurringSubscription(

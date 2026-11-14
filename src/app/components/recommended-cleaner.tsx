@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RecommendedCleaner as Recommendation } from "@/lib/booking-store";
 
 type State =
@@ -10,10 +10,23 @@ type State =
 
 /**
  * AI-01A: shows the recommended cleaner once a date and arrival window are picked.
- * The booking itself still goes out as an open request; this is information only.
+ * AI-01B: tells the booking form who it is (`onChange`), so the customer can
+ * book them directly; `null` while loading or when nobody is recommended.
  */
-export function RecommendedCleaner({ date, time }: { date: string; time: string }) {
+export function RecommendedCleaner({
+  date,
+  time,
+  onChange,
+}: {
+  date: string;
+  time: string;
+  onChange?: (recommendation: Recommendation | null) => void;
+}) {
   const [state, setState] = useState<State>({ status: "loading" });
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -27,6 +40,7 @@ export function RecommendedCleaner({ date, time }: { date: string; time: string 
         };
         if (!response.ok) throw new Error(result.error ?? "Recommendation unavailable.");
         setState({ status: "ready", recommendation: result.recommendation ?? null });
+        onChangeRef.current?.(result.recommendation ?? null);
       })
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return;
@@ -39,6 +53,7 @@ export function RecommendedCleaner({ date, time }: { date: string; time: string 
     return () => {
       controller.abort();
       setState({ status: "loading" });
+      onChangeRef.current?.(null);
     };
   }, [date, time]);
 
@@ -85,7 +100,7 @@ export function RecommendedCleaner({ date, time }: { date: string; time: string 
           {cleaner.reason === "score"
             ? "Best match on ratings and experience for this time."
             : "Most available cleaner this week."}{" "}
-          Your booking goes out as an open request, so another cleaner may accept it.
+          Book with {cleaner.name} to confirm straight away, or open the request to all cleaners.
         </p>
       </div>
     </div>

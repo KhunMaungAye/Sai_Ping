@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -96,6 +97,7 @@ export default function CustomerBookingsPage() {
   const [specialInstructions, setSpecialInstructions] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingFormError, setBookingFormError] = useState("");
+<<<<<<< ours
   // Bug Card 1: the address field shows its own message, right under the input.
   const [addressError, setAddressError] = useState("");
   const addressInputRef = useRef<HTMLInputElement>(null);
@@ -107,6 +109,20 @@ export default function CustomerBookingsPage() {
       formErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [bookingFormError]);
+=======
+  // AI-01B: the recommended cleaner the customer can book directly, and the
+  // id that makes a double click on "Book with [name]" save one booking.
+  const [recommendedCleaner, setRecommendedCleaner] = useState<{ cleanerId: string; name: string } | null>(null);
+  const bookingRequestId = useRef<string | null>(null);
+  const handleRecommendation = useCallback(
+    (recommendation: { cleanerId: string; name: string } | null) => {
+      setRecommendedCleaner(
+        recommendation ? { cleanerId: recommendation.cleanerId, name: recommendation.name } : null,
+      );
+    },
+    [],
+  );
+>>>>>>> theirs
   const [days, setDays] = useState<AvailableDay[]>([]);
 
   const selectedService = SERVICES.find((service) => service.id === serviceId) ?? SERVICES[0];
@@ -325,10 +341,16 @@ export default function CustomerBookingsPage() {
       return;
     }
 
+    // AI-01B: which button was pressed: "Book with [name]" or "Open to all cleaners".
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const directCleaner =
+      scheduleMode === "one-time" && submitter?.value === "direct" ? recommendedCleaner : null;
+
     setIsSubmitting(true);
 
     try {
       if (scheduleMode === "one-time") {
+        bookingRequestId.current ??= crypto.randomUUID();
         const response = await fetch("/api/bookings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -340,11 +362,14 @@ export default function CustomerBookingsPage() {
             serviceId,
             date,
             time,
+            preferredCleanerId: directCleaner?.cleanerId ?? null,
+            requestId: bookingRequestId.current,
           }),
         });
 
         const result = (await response.json().catch(() => null)) as {
           booking?: { id: string };
+          message?: string;
           error?: string;
         } | null;
 
@@ -352,8 +377,10 @@ export default function CustomerBookingsPage() {
           throw new Error(result?.error ?? "Could not schedule cleaning.");
         }
 
+        bookingRequestId.current = null;
         setBookingSuccessMsg(
-          "Your cleaning has been booked successfully! A cleaner will accept and confirm your request shortly.",
+          result.message ??
+            "Your cleaning has been booked successfully! A cleaner will accept and confirm your request shortly.",
         );
       } else {
         const response = await fetch("/api/subscriptions", {
@@ -840,7 +867,7 @@ export default function CustomerBookingsPage() {
                         date &&
                         time &&
                         availableSlots.includes(time) && (
-                          <RecommendedCleaner date={date} time={time} />
+                          <RecommendedCleaner date={date} time={time} onChange={handleRecommendation} />
                         )}
                     </fieldset>
 
@@ -927,6 +954,7 @@ export default function CustomerBookingsPage() {
                       </div>
                     </div>
 
+<<<<<<< ours
                     <button
                       type="submit"
                       className="confirm-button"
@@ -935,6 +963,44 @@ export default function CustomerBookingsPage() {
                     >
                       {isSubmitting ? "Submitting Booking…" : "Confirm Booking Request"}
                     </button>
+=======
+                    {scheduleMode === "one-time" && recommendedCleaner ? (
+                      // AI-01B: book the recommended cleaner directly, or keep the open request.
+                      <div className="direct-book-actions">
+                        <button
+                          type="submit"
+                          name="bookingMode"
+                          value="direct"
+                          className="confirm-button"
+                          disabled={isSubmitting || !time || !date || !address.trim()}
+                        >
+                          {isSubmitting ? "Submitting Booking…" : `Book with ${recommendedCleaner.name}`}
+                        </button>
+                        <button
+                          type="submit"
+                          name="bookingMode"
+                          value="open"
+                          className="open-request-button"
+                          disabled={isSubmitting || !time || !date || !address.trim()}
+                        >
+                          Open to all cleaners
+                        </button>
+                        <p className="direct-book-hint">
+                          Booking with {recommendedCleaner.name} confirms your cleaning straight away. An open
+                          request waits for any cleaner to accept it.
+                        </p>
+                      </div>
+                    ) : (
+                      <button
+                        type="submit"
+                        className="confirm-button"
+                        disabled={isSubmitting || !time || !date || !address.trim()}
+                        style={{ width: "100%", padding: "14px", fontSize: "16px", fontWeight: 600 }}
+                      >
+                        {isSubmitting ? "Submitting Booking…" : "Confirm Booking Request"}
+                      </button>
+                    )}
+>>>>>>> theirs
                   </form>
                 </div>
               </section>

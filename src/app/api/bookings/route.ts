@@ -280,8 +280,20 @@ export async function POST(request: Request) {
     time,
   };
 
+  // AI-01B: "Book with [name]" sends the recommended cleaner's id; the server
+  // re-checks that they can still take the job. `requestId` stops double clicks.
+  const preferredCleanerId = text(body.preferredCleanerId, 100) || null;
+  const requestId =
+    text(body.requestId, 100) || request.headers.get("idempotency-key")?.trim().slice(0, 100) || null;
+  if (preferredCleanerId && accountHolder === null) {
+    return Response.json(
+      { error: "Sign in as a customer to book a cleaner directly." },
+      { status: 401 },
+    );
+  }
+
   try {
-    const result = createBooking(input);
+    const result = createBooking(input, { assignTo: preferredCleanerId, requestId });
 
     if (result.status === "no-cleaner") {
       return Response.json(
@@ -304,7 +316,27 @@ export async function POST(request: Request) {
       );
     }
 
-    return Response.json({ booking: result.booking }, { status: 201 });
+    const assignedCleaner = result.booking.acceptedById
+      ? { id: result.booking.acceptedById, name: result.booking.acceptedByName ?? "" }
+      : null;
+    let message = "Your cleaning has been booked! A cleaner will accept and confirm your request shortly.";
+    if (assignedCleaner) {
+      message = `Booked with ${assignedCleaner.name}. Your cleaning is confirmed.`;
+    } else if (result.cleanerUnavailable) {
+      message =
+        "This cleaner is no longer available. Your booking was saved as an open request, so another cleaner can accept it.";
+    }
+
+    return Response.json(
+      {
+        booking: result.booking,
+        assignedCleaner,
+        cleanerUnavailable: result.cleanerUnavailable,
+        isDuplicate: result.status === "duplicate",
+        message,
+      },
+      { status: result.status === "duplicate" ? 200 : 201 },
+    );
   } catch {
     return Response.json(
       { error: "Your booking could not be saved. Please try again." },
