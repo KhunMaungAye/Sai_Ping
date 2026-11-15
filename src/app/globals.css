@@ -2717,7 +2717,7 @@ html {
 }
 .role-tiles {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 .role-tile {
@@ -2775,15 +2775,6 @@ html {
   color: var(--navy);
   box-shadow: 0 2px 8px rgba(11, 29, 107, 0.1);
 }
-.auth-admin-note {
-  margin: 0;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--sky);
-  color: var(--navy);
-  font-size: 14px;
-  font-weight: 600;
-}
 .auth-panel-form {
   display: grid;
   gap: 14px;
@@ -2839,6 +2830,14 @@ html {
   background: white;
   color: var(--ink);
   box-shadow: 0 30px 80px rgba(3, 12, 48, 0.35);
+}
+.login-become-cleaner {
+  margin: 18px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 /* Responsive */
