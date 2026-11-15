@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
-export type AuthRole = "customer" | "cleaner" | "admin";
+export type AuthRole = "customer" | "cleaner";
 export type AuthMode = "sign-in" | "sign-up";
 
 const REMEMBER_KEY = "saiping:last-login";
@@ -10,7 +10,6 @@ const REMEMBER_KEY = "saiping:last-login";
 const ROLE_LABELS: Record<AuthRole, string> = {
   customer: "Customer",
   cleaner: "Cleaner",
-  admin: "Admin",
 };
 
 function CustomerIcon() {
@@ -38,43 +37,27 @@ function CleanerIcon() {
   );
 }
 
-function AdminIcon() {
-  return (
-    <svg viewBox="0 0 48 48" aria-hidden="true">
-      <path d="M24 6 39 12v11c0 9.5-6.3 16.6-15 19-8.7-2.4-15-9.5-15-19V12Z" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinejoin="round" />
-      <path d="m17 24 5 5 9-10" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 const ROLE_ICONS: Record<AuthRole, () => ReactNode> = {
   customer: CustomerIcon,
   cleaner: CleanerIcon,
-  admin: AdminIcon,
 };
 
-function readRemembered(): { email: string; role: AuthRole } | null {
+/** US-18: only the email is remembered now — there's no sign-in role to restore. */
+function readRememberedEmail(): string {
   try {
-    const raw = window.localStorage.getItem(REMEMBER_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { email?: unknown; role?: unknown };
-    if (
-      typeof parsed.email === "string" &&
-      (parsed.role === "customer" || parsed.role === "cleaner" || parsed.role === "admin")
-    ) {
-      return { email: parsed.email, role: parsed.role };
-    }
-  } catch {}
-  return null;
+    return window.localStorage.getItem(REMEMBER_KEY) ?? "";
+  } catch {
+    return "";
+  }
 }
 
-function remember(email: string, role: AuthRole) {
+function rememberEmail(email: string) {
   try {
-    window.localStorage.setItem(REMEMBER_KEY, JSON.stringify({ email, role }));
+    window.localStorage.setItem(REMEMBER_KEY, email);
   } catch {}
 }
 
-function forgetRemembered() {
+function forgetRememberedEmail() {
   try {
     window.localStorage.removeItem(REMEMBER_KEY);
   } catch {}
@@ -82,7 +65,14 @@ function forgetRemembered() {
 
 /**
  * Sign-in and sign-up form shared by the home page pop-up and /login.
- * The role tiles only steer the form; the server decides the real role.
+ *
+ * US-18: sign-in is a single form (email + password) — the server decides
+ * the real account and role from `/api/auth/login`'s `redirectUrl`, so there
+ * is nothing to pick here, not even for the one admin account. Only
+ * Create account asks which kind of account, and only Customer/Cleaner are
+ * offered (admin accounts can't be registered). Opening the panel with
+ * `initialRole="cleaner"` — the "Become a cleaner" links — pre-selects
+ * Cleaner on that tab; the default Create account entry point stays Customer.
  */
 export function AuthPanel({
   initialRole,
@@ -96,9 +86,7 @@ export function AuthPanel({
   headingId?: string;
 }) {
   const [role, setRole] = useState<AuthRole>(initialRole ?? "customer");
-  const [mode, setMode] = useState<AuthMode>(
-    initialRole === "admin" ? "sign-in" : initialMode,
-  );
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -108,27 +96,23 @@ export function AuthPanel({
   const [errorMessage, setErrorMessage] = useState("");
   const [rememberedEmail, setRememberedEmail] = useState("");
 
+  const isSignUp = mode === "sign-up";
+
   // Returning visitors don't need to retype their email on sign-in (US-12).
   // A new account starts with an empty email, so the last user's address never carries over.
   useEffect(() => {
-    const saved = readRemembered();
+    const saved = readRememberedEmail();
     if (!saved) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only readable after mount
-    setRememberedEmail(saved.email);
-    if (initialMode !== "sign-in" && initialRole !== "admin") return;
-    setEmail(saved.email);
-    if (!initialRole) setRole(saved.role);
-  }, [initialRole, initialMode]);
+    setRememberedEmail(saved);
+    if (initialMode !== "sign-in") return;
+    setEmail(saved);
+  }, [initialMode]);
 
-  const isSignUp = mode === "sign-up" && role !== "admin";
   const showingRememberedEmail = !isSignUp && rememberedEmail !== "" && email === rememberedEmail;
 
   function chooseRole(next: AuthRole) {
     setRole(next);
-    if (next === "admin") {
-      setMode("sign-in");
-      if (!email && rememberedEmail) setEmail(rememberedEmail);
-    }
     setErrorMessage("");
   }
 
@@ -141,7 +125,7 @@ export function AuthPanel({
   }
 
   function clearRememberedEmail() {
-    forgetRemembered();
+    forgetRememberedEmail();
     setRememberedEmail("");
     setEmail("");
     setErrorMessage("");
@@ -189,7 +173,6 @@ export function AuthPanel({
         success?: boolean;
         redirectUrl?: string;
         error?: string;
-        user?: { role?: AuthRole };
       } | null;
 
       if (!res.ok || !data?.success) {
@@ -205,21 +188,9 @@ export function AuthPanel({
         return;
       }
 
-      const actualRole = data.user?.role ?? role;
-      if (!isSignUp && actualRole !== role) {
-        // Signed in, but with a different account type than the tile chosen:
-        // sign straight back out and point the user at the right tile.
-        await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
-        setPassword("");
-        setRole(actualRole);
-        setErrorMessage(
-          `This is a ${ROLE_LABELS[actualRole].toLowerCase()} account. We've switched to ${ROLE_LABELS[actualRole]} — sign in again.`,
-        );
-        setIsLoading(false);
-        return;
-      }
-
-      remember(trimmedEmail.toLowerCase(), actualRole);
+      // The server already decided the real account and role (US-18: sign-in
+      // never declares one), so there's nothing to reconcile — just go.
+      rememberEmail(trimmedEmail.toLowerCase());
       window.location.href = data.redirectUrl || "/dashboard";
     } catch {
       setPassword("");
@@ -237,66 +208,64 @@ export function AuthPanel({
       : "Create your account"
     : "Welcome back";
 
+  const subtitle = isSignUp
+    ? role === "cleaner"
+      ? "Pick the days you work and start accepting jobs near you."
+      : "Book trusted Bangkok cleaners in under a minute."
+    : "Sign in to your account.";
+
   return (
     <div className="auth-panel">
       <div className="auth-panel-head">
         <h2 id={headingId}>{title}</h2>
-        <p>
-          {isSignUp
-            ? role === "cleaner"
-              ? "Pick the days you work and start accepting jobs near you."
-              : "Book trusted Bangkok cleaners in under a minute."
-            : "Choose your account type and sign in."}
-        </p>
+        <p>{subtitle}</p>
       </div>
 
-      <div className="role-tiles" role="radiogroup" aria-label="Account type">
-        {(Object.keys(ROLE_LABELS) as AuthRole[]).map((key) => {
-          const Icon = ROLE_ICONS[key];
-          return (
-            <button
-              key={key}
-              type="button"
-              role="radio"
-              aria-checked={role === key}
-              aria-label={ROLE_LABELS[key]}
-              className={`role-tile${role === key ? " is-active" : ""}`}
-              onClick={() => chooseRole(key)}
-              disabled={isLoading}
-            >
-              <span className="role-tile-icon">
-                <Icon />
-              </span>
-              <span className="role-tile-label">{ROLE_LABELS[key]}</span>
-            </button>
-          );
-        })}
+      <div className="auth-tabs" role="tablist" aria-label="Sign in or create an account">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!isSignUp}
+          className={`auth-tab${!isSignUp ? " is-active" : ""}`}
+          onClick={() => chooseMode("sign-in")}
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={isSignUp}
+          className={`auth-tab${isSignUp ? " is-active" : ""}`}
+          onClick={() => chooseMode("sign-up")}
+        >
+          Create account
+        </button>
       </div>
 
-      {role === "admin" ? (
-        <p className="auth-admin-note">Admin sign-in only — there is one administrator account.</p>
-      ) : (
-        <div className="auth-tabs" role="tablist" aria-label="Sign in or create an account">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!isSignUp}
-            className={`auth-tab${!isSignUp ? " is-active" : ""}`}
-            onClick={() => chooseMode("sign-in")}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isSignUp}
-            className={`auth-tab${isSignUp ? " is-active" : ""}`}
-            onClick={() => chooseMode("sign-up")}
-          >
-            Create account
-          </button>
+      {isSignUp ? (
+        <div className="role-tiles" role="radiogroup" aria-label="Account type">
+          {(Object.keys(ROLE_LABELS) as AuthRole[]).map((key) => {
+            const Icon = ROLE_ICONS[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={role === key}
+                aria-label={ROLE_LABELS[key]}
+                className={`role-tile${role === key ? " is-active" : ""}`}
+                onClick={() => chooseRole(key)}
+                disabled={isLoading}
+              >
+                <span className="role-tile-icon">
+                  <Icon />
+                </span>
+                <span className="role-tile-label">{ROLE_LABELS[key]}</span>
+              </button>
+            );
+          })}
         </div>
-      )}
+      ) : null}
 
       <form onSubmit={handleSubmit} className="auth-panel-form" noValidate>
         {isSignUp ? (
@@ -411,7 +380,7 @@ export function AuthPanel({
           ) : isSignUp ? (
             `Create ${ROLE_LABELS[role].toLowerCase()} account`
           ) : (
-            `Sign in as ${ROLE_LABELS[role]}`
+            "Sign in"
           )}
         </button>
       </form>

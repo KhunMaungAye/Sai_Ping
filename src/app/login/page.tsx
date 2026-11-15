@@ -11,6 +11,9 @@ export default function LoginPage() {
   const router = useRouter();
   const session = useSession();
   const [redirect, setRedirect] = useState<string | null>(null);
+  // US-18: "Become a cleaner" jumps straight to Create account with Cleaner
+  // pre-selected, same shortcut the home page and footer offer.
+  const [wantsToBeACleaner, setWantsToBeACleaner] = useState(false);
   const checkingSession =
     session.status === "loading" || session.status === "ready";
 
@@ -53,8 +56,22 @@ export default function LoginPage() {
               <p>Checking authentication…</p>
             </div>
           ) : (
-            <AuthPanel redirect={redirect} headingId="login-title" />
+            <AuthPanel
+              key={wantsToBeACleaner ? "cleaner-sign-up" : "default"}
+              redirect={redirect}
+              headingId="login-title"
+              initialRole={wantsToBeACleaner ? "cleaner" : undefined}
+              initialMode={wantsToBeACleaner ? "sign-up" : "sign-in"}
+            />
           )}
+          {!checkingSession && !wantsToBeACleaner ? (
+            <p className="login-become-cleaner">
+              Want to work with Sai Ping?{" "}
+              <button type="button" className="text-button" onClick={() => setWantsToBeACleaner(true)}>
+                Become a cleaner
+              </button>
+            </p>
+          ) : null}
         </section>
       </div>
     </main>
