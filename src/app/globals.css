@@ -1667,6 +1667,25 @@ a {
   border-radius: 4px;
 }
 
+/* US-19: cleaner application status */
+.application-status-banner {
+  margin: 20px 0;
+  padding: 14px 16px;
+  border-left: 3px solid var(--amber);
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.application-status-pending {
+  background: #fef8ee;
+  color: #8a5a06;
+}
+.application-status-rejected {
+  background: #fbeeec;
+  border-left-color: var(--coral);
+  color: #7d2a1d;
+}
+
 /* Administrative Table */
 .table-responsive-wrapper {
   overflow-x: auto;
@@ -2779,6 +2798,23 @@ html {
   display: grid;
   gap: 14px;
 }
+/* US-19: cleaner application fields */
+.field-optional {
+  font-weight: 400;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.cleaner-application-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 480px) {
+  .cleaner-application-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .auth-field {
   display: grid;
   gap: 6px;
@@ -3417,6 +3453,66 @@ html {
 .manage-booking-button:focus-visible {
   outline: 2px solid var(--brand-blue);
   outline-offset: 2px;
+}
+
+/* US-19: cleaner application approve/reject */
+.approval-actions {
+  display: flex;
+  gap: 10px;
+}
+.reassign-link {
+  color: var(--brand-blue);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reassign-link:hover:not(:disabled) {
+  color: var(--navy);
+}
+.reassign-link:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.approval-reject-link {
+  color: var(--coral);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.approval-reject-link:hover:not(:disabled) {
+  color: #7d2a1d;
+}
+.approval-reject-link:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.approval-reject-box {
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+}
+.approval-reject-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.reassign-save {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: var(--brand-blue);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.reassign-save:hover:not(:disabled) {
+  background: var(--navy);
+}
+.reassign-save:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .admin-booking-dialog {

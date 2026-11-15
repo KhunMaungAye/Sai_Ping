@@ -6,6 +6,7 @@ import type {
   AdminCleanerSummary,
   AdminCustomerSummary,
   AdminReview,
+  CleanerApplication,
   CustomerBooking,
   User,
 } from "@/lib/booking-store";
@@ -28,6 +29,7 @@ import {
 import { signOut, useSession } from "@/lib/use-session";
 import { NoShowAlertsPanel, NoShowBanner, useNoShowAlerts } from "@/app/components/no-show-alerts";
 import { ReassignControl } from "@/app/components/reassign-control";
+import { CleanerApprovalControl } from "@/app/components/cleaner-approval-control";
 import { ReviewSummaryBar } from "@/app/components/cleaner-reviews";
 import { ReviewTagList } from "@/app/components/review-tags";
 import { summarizeReviews } from "@/lib/review-tags";
@@ -71,10 +73,11 @@ export default function AdminDashboardPage() {
   const authStatus = session.status === "ready" ? "authenticated" : "loading";
 
   const [activeTab, setActiveTab] = useState<
-    "bookings" | "no-shows" | "cleaners" | "customers" | "reviews" | "users"
+    "bookings" | "no-shows" | "cleaners" | "applications" | "customers" | "reviews" | "users"
   >("bookings");
   const noShows = useNoShowAlerts(authStatus === "authenticated");
   const [cleaners, setCleaners] = useState<AdminCleanerSummary[]>([]);
+  const [cleanerApplications, setCleanerApplications] = useState<CleanerApplication[]>([]);
   const [cleanerSort, setCleanerSort] = useState<CleanerRatingSort>("name");
   const [customers, setCustomers] = useState<AdminCustomerSummary[]>([]);
   const [reviews, setReviews] = useState<AdminReview[]>([]);
@@ -115,6 +118,7 @@ export default function AdminDashboardPage() {
           setCleaners(overview.cleaners ?? []);
           setCustomers(overview.customers ?? []);
           setReviews(overview.reviews ?? []);
+          setCleanerApplications(overview.cleanerApplications ?? []);
         }
         if (bookingData) {
           setStats(bookingData.stats);
@@ -334,6 +338,19 @@ export default function AdminDashboardPage() {
           >
             <span>Cleaners</span>
             <span className="tab-badge">{cleaners.length}</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "applications"}
+            className={`dashboard-tab${activeTab === "applications" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("applications")}
+          >
+            <span>Applications</span>
+            <span className="tab-badge">
+              {cleanerApplications.filter((a) => a.approvalStatus === "pending").length}
+            </span>
           </button>
 
           <button
@@ -606,6 +623,99 @@ export default function AdminDashboardPage() {
                     <tr>
                       <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
                         No cleaner accounts yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
+        {activeTab === "applications" ? (
+          <section className="tab-panel">
+            <div className="table-responsive-wrapper">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Applicant</th>
+                    <th>Contact</th>
+                    <th>Experience</th>
+                    <th>Areas</th>
+                    <th>Applied</th>
+                    <th>Status</th>
+                    <th>
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cleanerApplications.map((application) => (
+                    <tr key={application.cleanerId}>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <strong>{application.name}</strong>
+                          {application.about ? (
+                            <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                              {application.about}
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <span style={{ fontSize: "12px" }}>{application.email}</span>
+                          <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                            {application.phone ?? "—"}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        {application.experienceYears !== null
+                          ? `${application.experienceYears} yr${application.experienceYears === 1 ? "" : "s"}`
+                          : "—"}
+                      </td>
+                      <td>{application.areas ?? "—"}</td>
+                      <td>{application.appliedAt ? displayDate(application.appliedAt.slice(0, 10)) : "—"}</td>
+                      <td>
+                        <span
+                          className={`status-badge ${
+                            application.approvalStatus === "approved"
+                              ? "status-badge-completed"
+                              : application.approvalStatus === "rejected"
+                                ? "status-badge-cancelled"
+                                : "status-badge-pending"
+                          }`}
+                        >
+                          <span className="status-indicator-dot" aria-hidden="true" />
+                          {application.approvalStatus === "approved"
+                            ? "Approved"
+                            : application.approvalStatus === "rejected"
+                              ? "Rejected"
+                              : "Pending"}
+                        </span>
+                        {application.approvalStatus === "rejected" && application.reviewNote ? (
+                          <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+                            {application.reviewNote}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <CleanerApprovalControl
+                          cleanerId={application.cleanerId}
+                          approvalStatus={application.approvalStatus}
+                          onDone={(message, isError) => {
+                            setActionMessage(isError ? `Error: ${message}` : message);
+                            if (!isError) setRefresh((v) => v + 1);
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                  {cleanerApplications.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--muted)" }}>
+                        No cleaner applications yet.
                       </td>
                     </tr>
                   ) : null}

@@ -363,6 +363,36 @@ function initDatabaseSchema(database: DatabaseSync) {
     );
   }
 
+  // US-19: cleaner applications. Existing cleaners (seeded or already
+  // registered before this migration) default to 'approved', so nobody
+  // already working is locked out by it.
+  if (!cleanerColumns.some((column) => column.name === "approval_status")) {
+    database.exec(
+      "ALTER TABLE cleaners ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved';",
+    );
+  }
+  if (!cleanerColumns.some((column) => column.name === "phone")) {
+    database.exec("ALTER TABLE cleaners ADD COLUMN phone TEXT;");
+  }
+  if (!cleanerColumns.some((column) => column.name === "experience_years")) {
+    database.exec("ALTER TABLE cleaners ADD COLUMN experience_years INTEGER;");
+  }
+  if (!cleanerColumns.some((column) => column.name === "areas")) {
+    database.exec("ALTER TABLE cleaners ADD COLUMN areas TEXT;");
+  }
+  if (!cleanerColumns.some((column) => column.name === "about")) {
+    database.exec("ALTER TABLE cleaners ADD COLUMN about TEXT;");
+  }
+  if (!cleanerColumns.some((column) => column.name === "applied_at")) {
+    database.exec("ALTER TABLE cleaners ADD COLUMN applied_at TEXT;");
+  }
+  if (!cleanerColumns.some((column) => column.name === "reviewed_at")) {
+    database.exec("ALTER TABLE cleaners ADD COLUMN reviewed_at TEXT;");
+  }
+  if (!cleanerColumns.some((column) => column.name === "review_note")) {
+    database.exec("ALTER TABLE cleaners ADD COLUMN review_note TEXT;");
+  }
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS ratings (
       id TEXT PRIMARY KEY,
@@ -646,7 +676,8 @@ export function getServicedWeekdays(): Set<number> {
       `SELECT cleaners.available_days
        FROM users
        JOIN cleaners ON cleaners.id = users.cleaner_id
-       WHERE users.role = 'cleaner' AND users.status = 'active'`,
+       WHERE users.role = 'cleaner' AND users.status = 'active'
+         AND cleaners.approval_status = 'approved'`,
     )
     .all() as { available_days: string }[];
 
@@ -928,7 +959,8 @@ function findAssignableCleaner(
                   AND b.service_date = ? AND b.time_slot = ?) AS jobs_in_slot
        FROM users
        JOIN cleaners ON cleaners.id = users.cleaner_id
-       WHERE cleaners.id = ? AND users.role = 'cleaner' AND users.status = 'active'`,
+       WHERE cleaners.id = ? AND users.role = 'cleaner' AND users.status = 'active'
+         AND cleaners.approval_status = 'approved'`,
     )
     .get(date, time, cleanerId) as
     | { id: string; name: string; available_days: string; jobs_in_slot: number }
@@ -1896,6 +1928,13 @@ export function registerAccount(input: {
   passwordHash: string;
   name: string;
   role: "customer" | "cleaner";
+  /** US-19: a cleaner's short application, required when role is "cleaner". */
+  application?: {
+    phone: string;
+    experienceYears: number | null;
+    areas: string | null;
+    about: string | null;
+  };
 }): RegisterAccountResult {
   const database = getDatabase();
   database.exec("BEGIN IMMEDIATE");
@@ -1908,9 +1947,27 @@ export function registerAccount(input: {
     let cleanerId: string | null = null;
     if (input.role === "cleaner") {
       cleanerId = `cleaner-${randomUUID()}`;
+      // US-19: a new cleaner's account starts as a pending application —
+      // they can sign in and see its status, but can't take jobs yet
+      // (getServicedWeekdays, getRecommendedCleaner and acceptBookingRequest
+      // all require approval_status = 'approved').
       database
-        .prepare("INSERT INTO cleaners (id, name, available_days) VALUES (?, ?, ?)")
-        .run(cleanerId, input.name.trim(), "1,2,3,4,5");
+        .prepare(
+          `INSERT INTO cleaners (
+             id, name, available_days, approval_status, phone,
+             experience_years, areas, about, applied_at
+           ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          cleanerId,
+          input.name.trim(),
+          "1,2,3,4,5",
+          input.application?.phone ?? null,
+          input.application?.experienceYears ?? null,
+          input.application?.areas ?? null,
+          input.application?.about ?? null,
+          new Date().toISOString(),
+        );
     }
 
     const user = createUser({
@@ -2191,11 +2248,21 @@ export function getCleanerDashboardData(cleanerId: string) {
   const database = getDatabase();
   database.exec("BEGIN;");
   try {
+    const applicationRow = database
+      .prepare("SELECT approval_status, review_note FROM cleaners WHERE id = ?")
+      .get(cleanerId) as { approval_status: string; review_note: string | null } | undefined;
+    const approvalStatus = applicationRow?.approval_status ?? "approved";
+    const isApproved = approvalStatus === "approved";
+
     const data = {
       bookings: getCleanerBookings(cleanerId),
       cancelledJobs: getCleanerCancelledJobs(cleanerId),
-      availableRequests: getAvailableBookingRequests(),
+      // US-19: a cleaner whose application isn't approved yet can't accept
+      // jobs, so there's nothing honest to offer them here.
+      availableRequests: isApproved ? getAvailableBookingRequests() : [],
       availableDays: getCleanerAvailableDays(cleanerId),
+      approvalStatus,
+      reviewNote: isApproved ? null : (applicationRow?.review_note ?? null),
     };
     database.exec("COMMIT;");
     return data;
@@ -2340,6 +2407,21 @@ export function acceptBookingRequest(
     database
       .prepare("INSERT OR IGNORE INTO cleaners (id, name) VALUES (?, ?)")
       .run(cleanerId, cleanerName);
+
+    // US-19: a cleaner whose application isn't approved yet can't take jobs.
+    const approval = database
+      .prepare("SELECT approval_status FROM cleaners WHERE id = ?")
+      .get(cleanerId) as { approval_status: string } | undefined;
+    if (approval && approval.approval_status !== "approved") {
+      database.exec("ROLLBACK;");
+      return {
+        success: false,
+        error:
+          approval.approval_status === "pending"
+            ? "Your cleaner application is still under review. You can't accept jobs yet."
+            : "Your cleaner application wasn't approved, so you can't accept jobs.",
+      };
+    }
 
     const weekday = getDayOfWeekFromDateString(existing.service_date);
     if (!getCleanerAvailableDays(cleanerId).includes(weekday)) {
@@ -2876,6 +2958,122 @@ export function getAdminCleanerSummaries(): AdminCleanerSummary[] {
         : Math.round(row.average_rating * 10) / 10,
     reviewCount: row.review_count,
   }));
+}
+
+export type CleanerApplication = {
+  userId: string;
+  cleanerId: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  experienceYears: number | null;
+  areas: string | null;
+  about: string | null;
+  approvalStatus: "pending" | "approved" | "rejected";
+  appliedAt: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+};
+
+/** US-19: every cleaner's application, pending ones first then soonest-applied. */
+export function getCleanerApplications(): CleanerApplication[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT
+        users.id AS user_id,
+        users.name,
+        users.email,
+        cleaners.id AS cleaner_id,
+        cleaners.phone,
+        cleaners.experience_years,
+        cleaners.areas,
+        cleaners.about,
+        cleaners.approval_status,
+        cleaners.applied_at,
+        cleaners.reviewed_at,
+        cleaners.review_note
+      FROM users
+      JOIN cleaners ON cleaners.id = users.cleaner_id
+      WHERE users.role = 'cleaner'
+      ORDER BY
+        CASE cleaners.approval_status WHEN 'pending' THEN 0 ELSE 1 END,
+        cleaners.applied_at ASC`,
+    )
+    .all() as Array<{
+    user_id: string;
+    name: string;
+    email: string;
+    cleaner_id: string;
+    phone: string | null;
+    experience_years: number | null;
+    areas: string | null;
+    about: string | null;
+    approval_status: "pending" | "approved" | "rejected";
+    applied_at: string | null;
+    reviewed_at: string | null;
+    review_note: string | null;
+  }>;
+
+  return rows.map((row) => ({
+    userId: row.user_id,
+    cleanerId: row.cleaner_id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    experienceYears: row.experience_years,
+    areas: row.areas,
+    about: row.about,
+    approvalStatus: row.approval_status,
+    appliedAt: row.applied_at,
+    reviewedAt: row.reviewed_at,
+    reviewNote: row.review_note,
+  }));
+}
+
+export type SetCleanerApprovalResult =
+  | { status: "updated"; application: CleanerApplication }
+  | { status: "not-found" }
+  | { status: "invalid"; error: string };
+
+/**
+ * US-19: approve or reject a cleaner's application. Rejecting requires a
+ * reason (shown to the cleaner on their dashboard); approving clears any
+ * earlier rejection note, so re-approving someone starts clean.
+ */
+export function setCleanerApprovalStatus(
+  cleanerId: string,
+  action: "approve" | "reject",
+  note: string | null,
+): SetCleanerApprovalResult {
+  if (action === "reject" && !note?.trim()) {
+    return { status: "invalid", error: "Give a reason for rejecting this application." };
+  }
+
+  const database = getDatabase();
+  database.exec("BEGIN IMMEDIATE;");
+  try {
+    const exists = database.prepare("SELECT id FROM cleaners WHERE id = ?").get(cleanerId);
+    if (!exists) {
+      database.exec("ROLLBACK;");
+      return { status: "not-found" };
+    }
+
+    const approvalStatus = action === "approve" ? "approved" : "rejected";
+    const reviewNote = action === "approve" ? null : note!.trim();
+    database
+      .prepare(
+        "UPDATE cleaners SET approval_status = ?, reviewed_at = ?, review_note = ? WHERE id = ?",
+      )
+      .run(approvalStatus, new Date().toISOString(), reviewNote, cleanerId);
+    database.exec("COMMIT;");
+
+    const application = getCleanerApplications().find((app) => app.cleanerId === cleanerId);
+    if (!application) return { status: "not-found" };
+    return { status: "updated", application };
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
 }
 
 export function getAdminCustomerSummaries(): AdminCustomerSummary[] {
@@ -3721,7 +3919,8 @@ export function getRecommendedCleaner(
             AND b.service_date = ? AND b.time_slot = ?) AS jobs_in_slot
       FROM users
       JOIN cleaners ON cleaners.id = users.cleaner_id
-      WHERE users.role = 'cleaner' AND users.status = 'active'`,
+      WHERE users.role = 'cleaner' AND users.status = 'active'
+        AND cleaners.approval_status = 'approved'`,
     )
     .all(monday, sunday, date, time) as Array<{
     cleaner_id: string;
@@ -4055,6 +4254,7 @@ export function listReplacementCleaners(
        FROM users
        JOIN cleaners ON cleaners.id = users.cleaner_id
        WHERE users.role = 'cleaner' AND users.status = 'active' AND cleaners.id <> ?
+         AND cleaners.approval_status = 'approved'
        ORDER BY users.name`,
     )
     .all(excludeId) as Array<{ id: string; name: string; available_days: string }>;
