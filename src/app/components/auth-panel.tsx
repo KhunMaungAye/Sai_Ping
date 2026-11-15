@@ -95,8 +95,15 @@ export function AuthPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [rememberedEmail, setRememberedEmail] = useState("");
+  // US-19: a cleaner's short application — a phone number, years of
+  // experience, the areas they cover and a short note. No CV upload.
+  const [phone, setPhone] = useState("");
+  const [experienceYears, setExperienceYears] = useState("");
+  const [areas, setAreas] = useState("");
+  const [about, setAbout] = useState("");
 
   const isSignUp = mode === "sign-up";
+  const isCleanerSignUp = isSignUp && role === "cleaner";
 
   // Returning visitors don't need to retype their email on sign-in (US-12).
   // A new account starts with an empty email, so the last user's address never carries over.
@@ -157,6 +164,10 @@ export function AuthPanel({
       setErrorMessage("The two passwords don't match.");
       return;
     }
+    if (isCleanerSignUp && !phone.trim()) {
+      setErrorMessage("Please enter a phone number we can reach you on.");
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -165,7 +176,20 @@ export function AuthPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isSignUp
-            ? { name: name.trim(), email: trimmedEmail, password, role }
+            ? {
+                name: name.trim(),
+                email: trimmedEmail,
+                password,
+                role,
+                ...(isCleanerSignUp
+                  ? {
+                      phone: phone.trim(),
+                      experienceYears: experienceYears.trim() || null,
+                      areas: areas.trim() || null,
+                      about: about.trim() || null,
+                    }
+                  : {}),
+              }
             : { email: trimmedEmail, password, redirect },
         ),
       });
@@ -285,6 +309,83 @@ export function AuthPanel({
               }}
             />
           </label>
+        ) : null}
+
+        {isCleanerSignUp ? (
+          <>
+            <label className="auth-field">
+              <span className="field-label">Phone number</span>
+              <input
+                type="tel"
+                autoComplete="tel"
+                className="text-input"
+                placeholder="e.g. 081 234 5678"
+                value={phone}
+                maxLength={20}
+                disabled={isLoading}
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  setErrorMessage("");
+                }}
+              />
+            </label>
+
+            <div className="cleaner-application-grid">
+              <label className="auth-field">
+                <span className="field-label">
+                  Years of experience <span className="field-optional">(optional)</span>
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  className="text-input"
+                  placeholder="e.g. 3"
+                  value={experienceYears}
+                  disabled={isLoading}
+                  onChange={(e) => {
+                    setExperienceYears(e.target.value);
+                    setErrorMessage("");
+                  }}
+                />
+              </label>
+              <label className="auth-field">
+                <span className="field-label">
+                  Areas you cover <span className="field-optional">(optional)</span>
+                </span>
+                <input
+                  type="text"
+                  className="text-input"
+                  placeholder="e.g. Sukhumvit, Silom"
+                  value={areas}
+                  maxLength={200}
+                  disabled={isLoading}
+                  onChange={(e) => {
+                    setAreas(e.target.value);
+                    setErrorMessage("");
+                  }}
+                />
+              </label>
+            </div>
+
+            <label className="auth-field">
+              <span className="field-label">
+                Tell us about yourself <span className="field-optional">(optional)</span>
+              </span>
+              <textarea
+                className="text-input"
+                rows={3}
+                maxLength={500}
+                placeholder="Any cleaning experience, languages you speak, or anything else worth knowing."
+                value={about}
+                disabled={isLoading}
+                onChange={(e) => {
+                  setAbout(e.target.value);
+                  setErrorMessage("");
+                }}
+              />
+            </label>
+          </>
         ) : null}
 
         <div className="auth-field">

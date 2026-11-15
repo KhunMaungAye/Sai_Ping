@@ -2,6 +2,7 @@ import { requireRole } from "../../../../lib/auth.ts";
 import {
   getAdminCleanerSummaries,
   getAdminCustomerSummaries,
+  getCleanerApplications,
   listReviews,
 } from "../../../../lib/booking-store.ts";
 
@@ -20,6 +21,7 @@ export async function GET(request: Request) {
         cleaners: getAdminCleanerSummaries(),
         customers: getAdminCustomerSummaries(),
         reviews: listReviews(),
+        cleanerApplications: getCleanerApplications(),
       },
       { headers: { "Cache-Control": "no-store" } },
     );

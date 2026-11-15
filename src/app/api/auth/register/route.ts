@@ -55,11 +55,44 @@ export async function POST(request: Request) {
     return fail(passwordError, 400);
   }
 
+  // US-19: a cleaner's short application — a phone number, how many years of
+  // experience, the areas they cover and a short note. No CV upload.
+  let application: { phone: string; experienceYears: number | null; areas: string | null; about: string | null } | undefined;
+  if (role === "cleaner") {
+    const phone = typeof reqObj.phone === "string" ? reqObj.phone.trim() : "";
+    if (!phone) {
+      return fail("Please enter a phone number we can reach you on.", 400);
+    }
+    if (!/^[0-9+\-\s()]{7,20}$/.test(phone)) {
+      return fail("Please enter a valid phone number.", 400);
+    }
+
+    let experienceYears: number | null = null;
+    if (reqObj.experienceYears !== undefined && reqObj.experienceYears !== null && reqObj.experienceYears !== "") {
+      const parsed = Number(reqObj.experienceYears);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 60) {
+        return fail("Years of experience must be a whole number from 0 to 60.", 400);
+      }
+      experienceYears = parsed;
+    }
+
+    const areas = typeof reqObj.areas === "string" ? reqObj.areas.trim().slice(0, 200) : "";
+    const about = typeof reqObj.about === "string" ? reqObj.about.trim().slice(0, 500) : "";
+
+    application = {
+      phone,
+      experienceYears,
+      areas: areas || null,
+      about: about || null,
+    };
+  }
+
   const result = registerAccount({
     name,
     email,
     role,
     passwordHash: await hashPassword(password),
+    application,
   });
 
   if (result.status === "email-taken") {

@@ -21,7 +21,7 @@ export async function GET(request: Request) {
       : (new URL(request.url).searchParams.get("cleanerId") || user.cleanerId || DEFAULT_CLEANER.id);
 
   try {
-    const { bookings, cancelledJobs, availableRequests, availableDays } =
+    const { bookings, cancelledJobs, availableRequests, availableDays, approvalStatus, reviewNote } =
       getCleanerDashboardData(cleanerId);
     return Response.json(
       {
@@ -31,6 +31,8 @@ export async function GET(request: Request) {
         cancelledJobs,
         availableRequests,
         availableDays,
+        approvalStatus,
+        reviewNote,
       },
       {
         status: 200,

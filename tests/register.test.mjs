@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   addDaysToDateString,
   createBooking,
+  createUserSession,
   getDatabase,
   getDayOfWeekFromDateString,
   getUserByEmail,
@@ -15,6 +16,7 @@ import { POST as registerPOST } from "../src/app/api/auth/register/route.ts";
 import { POST as loginPOST } from "../src/app/api/auth/login/route.ts";
 import { GET as sessionGET } from "../src/app/api/auth/session/route.ts";
 import { POST as acceptPOST } from "../src/app/api/cleaner/bookings/[id]/accept/route.ts";
+import { POST as approvalPOST } from "../src/app/api/admin/cleaners/[id]/approval/route.ts";
 
 function post(handler, url, body) {
   return handler(
@@ -100,12 +102,13 @@ describe("Self-registration and a fresh database", () => {
     assert.strictEqual(login.status, 200);
   });
 
-  test("A new cleaner gets a working schedule and can accept jobs", async () => {
+  test("A new cleaner's application is pending until an admin approves it, then they can accept jobs", async () => {
     const res = await register({
       name: "Ploy Cleaner",
       email: "ploy@example.com",
       password: "sparkle2026",
       role: "cleaner",
+      phone: "081 234 5678",
     });
     assert.strictEqual(res.status, 201);
     assert.strictEqual((await res.json()).redirectUrl, "/dashboard/cleaner");
@@ -113,7 +116,27 @@ describe("Self-registration and a fresh database", () => {
     const user = getUserByEmail("ploy@example.com");
     assert.match(user.cleanerId, /^cleaner-/);
 
-    // Weekdays become bookable once a cleaner exists; weekends stay closed
+    // US-19: pending — not counted as a serviced weekday yet.
+    const tuesdayBeforeApproval = nextWeekday(2);
+    assert.deepStrictEqual(
+      listAvailableDays(undefined, 14).find((d) => d.date === tuesdayBeforeApproval).availableSlots,
+      [],
+    );
+
+    // An admin approves the application.
+    const admin = getUserByEmail("admin@saiping.com");
+    const adminCookie = `session_token=${createUserSession(admin.id).token}`;
+    const approve = await approvalPOST(
+      new Request(`http://localhost/api/admin/cleaners/${user.cleanerId}/approval`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: adminCookie },
+        body: JSON.stringify({ action: "approve" }),
+      }),
+      { params: Promise.resolve({ id: user.cleanerId }) },
+    );
+    assert.strictEqual(approve.status, 200);
+
+    // Weekdays become bookable once an approved cleaner exists; weekends stay closed
     const tuesday = nextWeekday(2);
     const sunday = nextWeekday(0);
     const days = listAvailableDays(undefined, 14);
@@ -154,7 +177,10 @@ describe("Self-registration and a fresh database", () => {
   test("Duplicate emails are rejected, including the admin's", async () => {
     const body = { name: "A", email: "dup@example.com", password: "password123", role: "customer" };
     assert.strictEqual((await register(body)).status, 201);
-    assert.strictEqual((await register({ ...body, role: "cleaner" })).status, 409);
+    assert.strictEqual(
+      (await register({ ...body, role: "cleaner", phone: "081 000 0000" })).status,
+      409,
+    );
     assert.strictEqual(
       (await register({ ...body, email: "ADMIN@saiping.com" })).status,
       409,

@@ -67,6 +67,12 @@ export default function CleanerDashboardPage() {
   const [statusMessage, setStatusMessage] = useState("");
   const [statusIsError, setStatusIsError] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  // US-19: a new cleaner's application starts pending; they can sign in and
+  // see its status, but can't take jobs until an admin approves it.
+  const [approvalStatus, setApprovalStatus] = useState<"pending" | "approved" | "rejected">(
+    "approved",
+  );
+  const [reviewNote, setReviewNote] = useState<string | null>(null);
 
   function showStatus(message: string, isError = false) {
     setStatusMessage(message);
@@ -98,12 +104,16 @@ export default function CleanerDashboardPage() {
           cancelledJobs?: CleanerCancelledJob[];
           availableRequests?: CustomerBooking[];
           availableDays?: number[];
+          approvalStatus?: "pending" | "approved" | "rejected";
+          reviewNote?: string | null;
         };
         setBookings(data.bookings ?? []);
         setCancelledJobs(data.cancelledJobs ?? []);
         setAvailableRequests(data.availableRequests ?? []);
         setAvailableDays(data.availableDays ?? []);
         setDraftDays(data.availableDays ?? []);
+        setApprovalStatus(data.approvalStatus ?? "approved");
+        setReviewNote(data.reviewNote ?? null);
       })
       .catch(() => {
         if (controller.signal.aborted) return;
@@ -281,6 +291,19 @@ export default function CleanerDashboardPage() {
           </p>
         </div>
 
+        {approvalStatus === "pending" ? (
+          <div className="application-status-banner application-status-pending" role="status">
+            <strong>Your application is under review.</strong> You can set your availability below,
+            but you won&apos;t see job requests or be able to accept jobs until an admin approves
+            your application.
+          </div>
+        ) : approvalStatus === "rejected" ? (
+          <div className="application-status-banner application-status-rejected" role="alert">
+            <strong>Your application wasn&apos;t approved.</strong>
+            {reviewNote ? ` ${reviewNote}` : ""} Contact Sai Ping support if you have questions.
+          </div>
+        ) : null}
+
         {/* Cleaner Summary Stats */}
         <div className="stats-grid">
           <div className="stat-card">
@@ -388,7 +411,23 @@ export default function CleanerDashboardPage() {
           {/* TAB 1: Available Customer Requests */}
           {activeTab === "available" && (
             <div>
-              {availableRequests.length === 0 ? (
+              {approvalStatus !== "approved" ? (
+                <div className="empty-bookings-card">
+                  <div className="empty-icon-circle" aria-hidden="true">
+                    ⏳
+                  </div>
+                  <h3>
+                    {approvalStatus === "pending"
+                      ? "Application under review"
+                      : "Application not approved"}
+                  </h3>
+                  <p>
+                    {approvalStatus === "pending"
+                      ? "You'll see job requests here once an admin approves your application."
+                      : "You can't accept jobs. Contact Sai Ping support if you have questions."}
+                  </p>
+                </div>
+              ) : availableRequests.length === 0 ? (
                 <div className="empty-bookings-card">
                   <div className="empty-icon-circle" aria-hidden="true">
                     🎉
