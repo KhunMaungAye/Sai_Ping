@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   createUserSession,
   getUserByEmail,
@@ -8,77 +9,66 @@ import {
   validateRedirect,
   verifyPassword,
 } from "../../../../lib/auth.ts";
+import { parseBody } from "../../../../lib/validation.ts";
+
+const NO_STORE = { "Cache-Control": "no-store" };
+
+const loginSchema = z.object({
+  email: z
+    .string()
+    .catch("")
+    .transform((value) => value.trim())
+    .pipe(
+      z
+        .string()
+        .min(1, "Please enter your email address.")
+        .refine(isValidEmail, "Please enter a valid email address."),
+    )
+    .transform((value) => value.toLowerCase()),
+  password: z.string().catch("").pipe(z.string().min(1, "Please enter your password.")),
+});
 
 export async function POST(request: Request) {
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return Response.json(
-      { error: "Invalid JSON request body." },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
-    );
+    return Response.json({ error: "Invalid JSON request body." }, { status: 400, headers: NO_STORE });
   }
 
   if (typeof body !== "object" || body === null) {
     return Response.json(
       { error: "Email and password are required." },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
+      { status: 400, headers: NO_STORE },
     );
   }
 
   const reqObj = body as Record<string, unknown>;
-  const email =
-    typeof reqObj.email === "string" ? reqObj.email.trim().toLowerCase() : "";
-  const password =
-    typeof reqObj.password === "string" ? reqObj.password : "";
-  const redirectTarget =
-    typeof reqObj.redirect === "string" ? reqObj.redirect : null;
+  const redirectTarget = typeof reqObj.redirect === "string" ? reqObj.redirect : null;
 
-  if (!email) {
-    return Response.json(
-      { error: "Please enter your email address." },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
-    );
+  const parsed = parseBody(loginSchema, reqObj);
+  if (!parsed.ok) {
+    return Response.json({ error: parsed.error }, { status: 400, headers: NO_STORE });
   }
-
-  if (!isValidEmail(email)) {
-    return Response.json(
-      { error: "Please enter a valid email address." },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
-    );
-  }
-
-  if (!password) {
-    return Response.json(
-      { error: "Please enter your password." },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
-    );
-  }
+  const { email, password } = parsed.data;
 
   const user = getUserByEmail(email);
 
   // Generic credential error to prevent account enumeration attacks
   if (!user) {
-    return Response.json(
-      { error: "Invalid email or password." },
-      { status: 401, headers: { "Cache-Control": "no-store" } },
-    );
+    return Response.json({ error: "Invalid email or password." }, { status: 401, headers: NO_STORE });
   }
 
   if (user.status === "suspended") {
     return Response.json(
       { error: "Your account has been suspended. Please contact support." },
-      { status: 403, headers: { "Cache-Control": "no-store" } },
+      { status: 403, headers: NO_STORE },
     );
   }
 
   const isPasswordValid = await verifyPassword(password, user.password_hash);
   if (!isPasswordValid) {
-    return Response.json(
-      { error: "Invalid email or password." },
-      { status: 401, headers: { "Cache-Control": "no-store" } },
-    );
+    return Response.json({ error: "Invalid email or password." }, { status: 401, headers: NO_STORE });
   }
 
   // Create persistent session (7 days)
@@ -98,9 +88,6 @@ export async function POST(request: Request) {
       },
       redirectUrl,
     },
-    {
-      status: 200,
-      headers,
-    },
+    { status: 200, headers },
   );
 }

@@ -3455,24 +3455,11 @@ html {
   outline-offset: 2px;
 }
 
-/* US-19: cleaner application approve/reject */
+/* US-19: cleaner application approve/reject (reassign-link/-save are
+   shared with ReassignControl, defined further down) */
 .approval-actions {
   display: flex;
   gap: 10px;
-}
-.reassign-link {
-  color: var(--brand-blue);
-  font-size: 12px;
-  font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.reassign-link:hover:not(:disabled) {
-  color: var(--navy);
-}
-.reassign-link:disabled {
-  opacity: 0.6;
-  cursor: wait;
 }
 .approval-reject-link {
   color: var(--coral);
@@ -3497,22 +3484,6 @@ html {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.reassign-save {
-  min-height: 32px;
-  padding: 0 12px;
-  border-radius: 6px;
-  background: var(--brand-blue);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-}
-.reassign-save:hover:not(:disabled) {
-  background: var(--navy);
-}
-.reassign-save:disabled {
-  opacity: 0.6;
-  cursor: wait;
 }
 
 .admin-booking-dialog {
