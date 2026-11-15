@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -97,7 +96,6 @@ export default function CustomerBookingsPage() {
   const [specialInstructions, setSpecialInstructions] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingFormError, setBookingFormError] = useState("");
-<<<<<<< ours
   // Bug Card 1: the address field shows its own message, right under the input.
   const [addressError, setAddressError] = useState("");
   const addressInputRef = useRef<HTMLInputElement>(null);
@@ -109,7 +107,7 @@ export default function CustomerBookingsPage() {
       formErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [bookingFormError]);
-=======
+
   // AI-01B: the recommended cleaner the customer can book directly, and the
   // id that makes a double click on "Book with [name]" save one booking.
   const [recommendedCleaner, setRecommendedCleaner] = useState<{ cleanerId: string; name: string } | null>(null);
@@ -122,7 +120,6 @@ export default function CustomerBookingsPage() {
     },
     [],
   );
->>>>>>> theirs
   const [days, setDays] = useState<AvailableDay[]>([]);
 
   const selectedService = SERVICES.find((service) => service.id === serviceId) ?? SERVICES[0];
@@ -954,16 +951,6 @@ export default function CustomerBookingsPage() {
                       </div>
                     </div>
 
-<<<<<<< ours
-                    <button
-                      type="submit"
-                      className="confirm-button"
-                      disabled={isSubmitting}
-                      style={{ width: "100%", padding: "14px", fontSize: "16px", fontWeight: 600 }}
-                    >
-                      {isSubmitting ? "Submitting Booking…" : "Confirm Booking Request"}
-                    </button>
-=======
                     {scheduleMode === "one-time" && recommendedCleaner ? (
                       // AI-01B: book the recommended cleaner directly, or keep the open request.
                       <div className="direct-book-actions">
@@ -1000,7 +987,6 @@ export default function CustomerBookingsPage() {
                         {isSubmitting ? "Submitting Booking…" : "Confirm Booking Request"}
                       </button>
                     )}
->>>>>>> theirs
                   </form>
                 </div>
               </section>
