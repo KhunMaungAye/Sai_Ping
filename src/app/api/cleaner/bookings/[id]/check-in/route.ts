@@ -1,6 +1,6 @@
 import { requireRole } from "../../../../../../lib/auth.ts";
 import { checkInForVisit } from "../../../../../../lib/booking-store.ts";
-import { visitResponse } from "../../../../../../lib/visit-response.ts";
+import { visitResponse } from "../../../../../../features/visit-response/visit-response.ts";
 
 type RouteContext = { params: Promise<{ id: string }> };
 

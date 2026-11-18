@@ -1,4 +1,4 @@
-import type { VisitUpdateResult } from "./booking-store.ts";
+import type { VisitUpdateResult } from "../../lib/booking-store.ts";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
