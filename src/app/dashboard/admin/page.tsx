@@ -33,6 +33,7 @@ import { CleanerApprovalControl } from "@/app/components/cleaner-approval-contro
 import { ReviewSummaryBar } from "@/app/components/cleaner-reviews";
 import { ReviewTagList } from "@/app/components/review-tags";
 import { summarizeReviews } from "@/lib/review-tags";
+import { ShiftDraftPanel } from "@/app/components/shift-draft-panel";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -73,7 +74,14 @@ export default function AdminDashboardPage() {
   const authStatus = session.status === "ready" ? "authenticated" : "loading";
 
   const [activeTab, setActiveTab] = useState<
-    "bookings" | "no-shows" | "cleaners" | "applications" | "customers" | "reviews" | "users"
+    | "bookings"
+    | "no-shows"
+    | "cleaners"
+    | "applications"
+    | "shift-draft"
+    | "customers"
+    | "reviews"
+    | "users"
   >("bookings");
   const noShows = useNoShowAlerts(authStatus === "authenticated");
   const [cleaners, setCleaners] = useState<AdminCleanerSummary[]>([]);
@@ -351,6 +359,16 @@ export default function AdminDashboardPage() {
             <span className="tab-badge">
               {cleanerApplications.filter((a) => a.approvalStatus === "pending").length}
             </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "shift-draft"}
+            className={`dashboard-tab${activeTab === "shift-draft" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("shift-draft")}
+          >
+            <span>Shift Draft</span>
           </button>
 
           <button
@@ -834,6 +852,10 @@ export default function AdminDashboardPage() {
               setRefresh((v) => v + 1);
             }}
           />
+        ) : null}
+
+        {activeTab === "shift-draft" ? (
+          <ShiftDraftPanel onPublished={() => setRefresh((v) => v + 1)} />
         ) : null}
 
         {activeTab === "users" ? (
