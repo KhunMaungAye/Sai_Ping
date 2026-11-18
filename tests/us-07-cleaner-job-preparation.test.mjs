@@ -14,7 +14,7 @@ import {
   resetDatabaseForTesting,
   SERVICES,
 } from "../src/lib/booking-store.ts";
-import { addHours, jobPreparation, SERVICE_SPECS } from "../src/lib/service-specs.ts";
+import { addHours, jobPreparation, SERVICE_SPECS } from "../src/features/service-specs/service-specs.ts";
 import { GET as jobGET } from "../src/app/api/cleaner/bookings/[id]/route.ts";
 import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 

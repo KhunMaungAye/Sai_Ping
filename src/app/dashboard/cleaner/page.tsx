@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import type { CleanerCancelledJob, CustomerBooking } from "@/lib/booking-store";
 import { bangkokDateString } from "@/lib/date-utils";
 import { getServiceStartTime } from "@/lib/services";
-import { jobPreparation, type JobPreparation } from "@/lib/service-specs";
+import { jobPreparation, type JobPreparation } from "@/features/service-specs/service-specs";
 import { CleanerReviews } from "@/app/components/cleaner-reviews";
 import { signOut, useSession } from "@/lib/use-session";
 

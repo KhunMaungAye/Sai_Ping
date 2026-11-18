@@ -2,7 +2,7 @@
 // estimated finish, length) and the service specs (what's included, what to
 // bring). No database code, so the cleaner page, the API and node tests share it.
 
-import { SERVICES, type ServiceId } from "./services.ts";
+import { SERVICES, type ServiceId } from "../../lib/services.ts";
 
 export type ServiceSpec = {
   /** Job length in whole hours; matches the "duration" text in SERVICES. */

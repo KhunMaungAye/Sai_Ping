@@ -1,6 +1,6 @@
 import { requireRole } from "../../../../../lib/auth.ts";
 import { getCleanerBookings } from "../../../../../lib/booking-store.ts";
-import { jobPreparation } from "../../../../../lib/service-specs.ts";
+import { jobPreparation } from "../../../../../features/service-specs/service-specs.ts";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
