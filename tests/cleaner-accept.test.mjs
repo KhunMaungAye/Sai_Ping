@@ -2,6 +2,7 @@ import test, { describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  addDaysToDateString,
   createBooking,
   createUserSession,
   getDatabase,
@@ -10,10 +11,14 @@ import {
   getAvailableBookingRequests,
   getCleanerBookings,
   getAllBookingsAdmin,
+  localDateString,
 } from "../src/lib/booking-store.ts";
 import { POST as handleAcceptPOST } from "../src/app/api/cleaner/bookings/[id]/accept/route.ts";
 import { GET as handleCleanerBookingsGET } from "../src/app/api/cleaner/bookings/route.ts";
 import { seedTestUsers } from "./helpers/seed-test-users.mjs";
+
+/** A date far enough ahead to never go stale as "today" advances. */
+const farDate = (days = 10) => addDaysToDateString(localDateString(), days);
 
 describe("Cleaner Request Acceptance and Separate Pages", () => {
   let testDb;
@@ -38,7 +43,7 @@ describe("Cleaner Request Acceptance and Separate Pages", () => {
       name: "Bob Client",
       email: "bob@example.com",
       serviceId: "essential",
-      date: "2026-11-15",
+      date: farDate(),
       time: "09:00",
       address: "456 Oak Avenue",
     });
@@ -122,7 +127,7 @@ describe("Cleaner Request Acceptance and Separate Pages", () => {
       name: "Charlie Customer",
       email: "charlie@example.com",
       serviceId: "deep",
-      date: "2026-11-20",
+      date: farDate(5),
       time: "14:00",
       address: "789 Pine Road",
     });
