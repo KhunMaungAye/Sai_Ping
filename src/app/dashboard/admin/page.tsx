@@ -33,7 +33,7 @@ import { CleanerApprovalControl } from "@/app/components/cleaner-approval-contro
 import { ReviewSummaryBar } from "@/app/components/cleaner-reviews";
 import { ReviewTagList } from "@/app/components/review-tags";
 import { summarizeReviews } from "@/lib/review-tags";
-import { ShiftDraftPanel } from "@/app/components/shift-draft-panel";
+import { ShiftDraftPanel } from "@/features/shift-draft/shift-draft-panel";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
