@@ -29,7 +29,7 @@ import {
 import { RecurringPlans } from "../components/recurring-plans";
 import { RecommendedCleaner } from "../components/recommended-cleaner";
 import { ReviewTagList, ReviewTagPicker } from "../components/review-tags";
-import { findBookingFormProblem } from "@/lib/booking-form";
+import { findBookingFormProblem } from "@/features/booking-form/booking-form";
 import type { ReviewTag } from "@/lib/review-tags";
 
 function dateString(value: Date) {

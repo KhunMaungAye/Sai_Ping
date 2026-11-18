@@ -7,8 +7,8 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { getDatabase } from "./booking-store.ts";
-import { addDaysToDateString, bangkokDateString, getDayOfWeekFromDateString } from "./date-utils.ts";
+import { getDatabase } from "../../lib/booking-store.ts";
+import { addDaysToDateString, bangkokDateString, getDayOfWeekFromDateString } from "../../lib/date-utils.ts";
 import {
   WEEKLY_HOUR_CAP,
   hasEnoughTravelTime,

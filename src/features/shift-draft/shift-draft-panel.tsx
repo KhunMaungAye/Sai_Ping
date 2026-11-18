@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ShiftDraft } from "@/lib/shift-draft";
+import type { ShiftDraft } from "@/features/shift-draft/shift-draft";
 
 const TIME_LABELS: Record<string, string> = { "09:00": "9:00 AM", "14:00": "2:00 PM" };
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

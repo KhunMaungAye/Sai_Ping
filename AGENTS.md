@@ -61,18 +61,39 @@ src/app/login/                    Dedicated sign-in page (uses AuthPanel)
 src/app/bookings/                 Customer portal (book, track, rate & review)
 src/app/dashboard/                /dashboard role router; admin/ and cleaner/ dashboards
 src/app/rate/[id]/                Rating page for one booking
-src/app/components/               home-page, auth-panel, auth-modal, brand-logo, role-router
-src/app/api/**/route.ts           Route handlers
+src/app/components/               Components with no feature-sized lib partner:
+                                   home-page, auth-modal, auth-panel, brand-logo, role-router,
+                                   no-show-alerts, reassign-control, cleaner-approval-control,
+                                   recommended-cleaner, recurring-plans, review-tags, cleaner-reviews
+src/app/api/**/route.ts           Route handlers (Next.js requires these to stay put)
 src/app/globals.css               All styles
-src/lib/booking-store.ts          Schema, migrations, seed data and every query
-src/lib/auth.ts                   Password hashing, sessions, cookies, role guards
-src/lib/use-session.ts            Client hook: current user + role redirects
-src/lib/services.ts               Service packages, prices, TIME_SLOTS
-src/lib/date-utils.ts             UTC-safe YYYY-MM-DD helpers
-src/lib/shift-draft.ts            AI-02B weekly shift draft (its own two tables, created on first use)
-src/lib/shift-rules.ts            AI-02B job hours, 35-hour cap, travel-time rule (stand-in for AI-02A)
-tests/                            node:test suites; tests/helpers/seed-test-users.mjs
+src/lib/                          Cross-cutting shared code (imported directly by booking-store.ts,
+                                   or by multiple unrelated features):
+  booking-store.ts                  Schema, migrations, seed data and every query (4,500+ lines)
+  auth.ts                           Password hashing, sessions, cookies, role guards
+  use-session.ts                    Client hook: current user + role redirects
+  services.ts                       Service packages, prices, TIME_SLOTS
+  date-utils.ts                     UTC-safe YYYY-MM-DD helpers
+  validation.ts                     zod parseBody() helper shared by API routes
+  booking-badges.ts                 Status badge logic — booking-store.ts imports it directly
+  travel-time.ts                    AI-02B travel-time conflict rule — booking-store.ts imports it directly
+  review-tags.ts                    US-16 review tags/summary — booking-store.ts imports it directly
+  subscription-changes.ts           US-04 recurring-plan change summaries — booking-store.ts imports it directly
+src/features/<feature>/           One folder per feature: its lib logic + UI colocated, siblings of src/lib/
+  visit-response/                   visit-response.ts
+  booking-form/                     booking-form.ts
+  cleaner-ratings/                  cleaner-ratings.ts
+  service-specs/                    service-specs.ts
+  admin-bookings/                   admin-bookings.ts, admin-booking-manager.tsx
+  shift-draft/                      shift-draft.ts, shift-rules.ts, shift-draft-panel.tsx (AI-02B)
+tests/                            node:test suites (flat — tests/*.test.mjs); tests/helpers/seed-test-users.mjs
 ```
+
+A file stays in `src/lib/` instead of moving into `src/features/` whenever
+`booking-store.ts` imports it directly — moving it would make the shared core
+depend on a "feature," backwards from the intended direction. `route.ts`/
+`page.tsx` files stay exactly where Next.js's routing requires them; only
+their imports change when something they import moves.
 
 ## Architecture rules
 

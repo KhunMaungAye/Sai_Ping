@@ -4,7 +4,7 @@
 // 60 minutes after the previous one ends; exactly 60 minutes is fine.
 // No database code, so the store, the API and node tests share one rule.
 
-import { SERVICE_SPECS } from "./service-specs.ts";
+import { SERVICE_SPECS } from "../features/service-specs/service-specs.ts";
 import type { ServiceId } from "./services.ts";
 
 /** Minimum gap between two jobs on the same day. (60 minutes: PO to confirm.) */

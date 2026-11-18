@@ -1,5 +1,5 @@
 import { requireRole } from "../../../../../../lib/auth.ts";
-import { changeDraftCleaner } from "../../../../../../lib/shift-draft.ts";
+import { changeDraftCleaner } from "../../../../../../features/shift-draft/shift-draft.ts";
 
 type RouteContext = { params: Promise<{ bookingId: string }> };
 

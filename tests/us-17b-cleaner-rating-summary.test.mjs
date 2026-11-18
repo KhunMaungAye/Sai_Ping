@@ -11,7 +11,7 @@ import {
   resetDatabaseForTesting,
   updateUserStatus,
 } from "../src/lib/booking-store.ts";
-import { formatAverageRating, sortCleanerSummaries } from "../src/lib/cleaner-ratings.ts";
+import { formatAverageRating, sortCleanerSummaries } from "../src/features/cleaner-ratings/cleaner-ratings.ts";
 import { POST as acceptPOST } from "../src/app/api/cleaner/bookings/[id]/accept/route.ts";
 import { POST as completePOST } from "../src/app/api/cleaner/bookings/[id]/complete/route.ts";
 import { POST as ratingPOST } from "../src/app/api/bookings/[id]/rating/route.ts";

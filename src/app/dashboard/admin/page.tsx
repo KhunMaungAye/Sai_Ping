@@ -19,13 +19,13 @@ import {
   countBookingsByStatus,
   filterAdminBookings,
   searchAdminBookings,
-} from "@/lib/admin-bookings";
-import { AdminBookingManager } from "@/app/components/admin-booking-manager";
+} from "@/features/admin-bookings/admin-bookings";
+import { AdminBookingManager } from "@/features/admin-bookings/admin-booking-manager";
 import {
   type CleanerRatingSort,
   formatAverageRating,
   sortCleanerSummaries,
-} from "@/lib/cleaner-ratings";
+} from "@/features/cleaner-ratings/cleaner-ratings";
 import { signOut, useSession } from "@/lib/use-session";
 import { NoShowAlertsPanel, NoShowBanner, useNoShowAlerts } from "@/app/components/no-show-alerts";
 import { ReassignControl } from "@/app/components/reassign-control";
