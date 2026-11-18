@@ -16,7 +16,7 @@ import {
   adminCleanerLabel,
   countBookingsByStatus,
   filterAdminBookings,
-} from "../src/lib/admin-bookings.ts";
+} from "../src/features/admin-bookings/admin-bookings.ts";
 import { GET as adminBookingsGET } from "../src/app/api/admin/bookings/route.ts";
 import { POST as acceptPOST } from "../src/app/api/cleaner/bookings/[id]/accept/route.ts";
 import { POST as completePOST } from "../src/app/api/cleaner/bookings/[id]/complete/route.ts";

@@ -14,7 +14,7 @@ import {
   resetDatabaseForTesting,
   submitBookingRating,
 } from "../src/lib/booking-store.ts";
-import { searchAdminBookings } from "../src/lib/admin-bookings.ts";
+import { searchAdminBookings } from "../src/features/admin-bookings/admin-bookings.ts";
 import { bangkokDateString } from "../src/lib/date-utils.ts";
 import { GET as detailGET, PATCH as detailPATCH } from "../src/app/api/admin/bookings/[id]/route.ts";
 import { POST as acceptPOST } from "../src/app/api/cleaner/bookings/[id]/accept/route.ts";

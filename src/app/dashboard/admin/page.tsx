@@ -19,8 +19,8 @@ import {
   countBookingsByStatus,
   filterAdminBookings,
   searchAdminBookings,
-} from "@/lib/admin-bookings";
-import { AdminBookingManager } from "@/app/components/admin-booking-manager";
+} from "@/features/admin-bookings/admin-bookings";
+import { AdminBookingManager } from "@/features/admin-bookings/admin-booking-manager";
 import {
   type CleanerRatingSort,
   formatAverageRating,

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { AdminBooking, AdminBookingChange } from "@/lib/booking-store";
-import { adminCleanerLabel } from "@/lib/admin-bookings";
+import { adminCleanerLabel } from "@/features/admin-bookings/admin-bookings";
 import { SPECIAL_INSTRUCTIONS_MAX_LENGTH, TIME_SLOTS } from "@/lib/services";
 
 const TIME_LABELS: Record<string, string> = { "09:00": "9:00 AM", "14:00": "2:00 PM" };
