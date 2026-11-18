@@ -15,7 +15,7 @@ import {
   DATE_REQUIRED_MESSAGE,
   TIME_REQUIRED_MESSAGE,
   findBookingFormProblem,
-} from "../src/lib/booking-form.ts";
+} from "../src/features/booking-form/booking-form.ts";
 import { POST as bookingsPOST } from "../src/app/api/bookings/route.ts";
 import { seedTestUsers } from "./helpers/seed-test-users.mjs";
 
