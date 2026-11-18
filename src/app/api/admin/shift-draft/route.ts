@@ -1,5 +1,5 @@
 import { requireRole } from "../../../../lib/auth.ts";
-import { generateShiftDraft, getShiftDraft, nextWeek } from "../../../../lib/shift-draft.ts";
+import { generateShiftDraft, getShiftDraft, nextWeek } from "../../../../features/shift-draft/shift-draft.ts";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 

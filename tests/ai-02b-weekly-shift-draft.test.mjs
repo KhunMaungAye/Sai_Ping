@@ -15,8 +15,8 @@ import {
   hasEnoughTravelTime,
   jobHours,
   totalHours,
-} from "../src/lib/shift-rules.ts";
-import { NOTHING_TO_SCHEDULE, NO_CLEANER_FLAG, TRAVEL_TIME_MESSAGE, nextWeek } from "../src/lib/shift-draft.ts";
+} from "../src/features/shift-draft/shift-rules.ts";
+import { NOTHING_TO_SCHEDULE, NO_CLEANER_FLAG, TRAVEL_TIME_MESSAGE, nextWeek } from "../src/features/shift-draft/shift-draft.ts";
 import { GET as draftGET, POST as draftPOST } from "../src/app/api/admin/shift-draft/route.ts";
 import { PATCH as itemPATCH } from "../src/app/api/admin/shift-draft/items/[bookingId]/route.ts";
 import { POST as publishPOST } from "../src/app/api/admin/shift-draft/publish/route.ts";
